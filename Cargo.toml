@@ -1,0 +1,11 @@
+[package]
+name = "deep-chip"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eframe = "0.30.0"
+egui = "0.30.0"
+egui_extras = "0.30.0"
+rand = "0.8.5"
+rodio = "0.20.1"
