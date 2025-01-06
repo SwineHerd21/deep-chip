@@ -1,6 +1,6 @@
 # Deep-Chip
 
-Deep-Chip is a desktop CHIP-8 interpreter with real-time state inspection made with Rust and [egui](https://github.com/emilk/egui).
+Deep-Chip is a desktop CHIP-8 interpreter with real-time debug UI made with Rust and [egui](https://github.com/emilk/egui).
 
 ![Showcase (an older version)](octotitle.gif)  
 (The gif is from an older version, the current UI looks differently)
