@@ -36,7 +36,7 @@ fn main() {
     eframe::run_native(
         "DEEP-CHIP",
         eframe::NativeOptions {
-            viewport: egui::ViewportBuilder::default().with_inner_size([1060.0, 650.0]),
+            viewport: egui::ViewportBuilder::default().with_inner_size([1060.0, 630.0]),
             ..Default::default()
         },
         Box::new(|cc| {
@@ -52,28 +52,33 @@ fn main() {
 struct Emulator {
     /// Access to the interpreter.
     interpreter: Arc<Mutex<Chip8>>,
+
     /// The texture to which the display is rendered.
     screen: TextureHandle,
+    /// The color of disabled pixels.
+    background_color: Color32,
+    /// The color of enabled pixels.
+    fill_color: Color32,
+
     /// The current ROM.
     rom: Vec<u8>,
     /// The value of the path input field.
     rom_path: String,
     /// Possible ROM loading error.
     load_error: Option<std::io::Error>,
-    /// Whether to show the interpreter state window.
+    /// Whether to show the load ROM modal
+    show_load_modal: bool,
+
+    /// Whether to show the interpreter state panel.
     show_state: bool,
-    /// Whether to show the keypad state window.
+    /// Whether to show the keypad state panel.
     show_keys: bool,
-    /// Whether to show the RAM window.
+    /// Whether to show the RAM panel.
     show_ram: bool,
     /// Whether to show the ROM window.
-    show_rom: bool,
+    show_rom_window: bool,
     /// Whether to show the display settings window.
     show_display_settings: bool,
-    /// The color of disabled pixels.
-    background_color: Color32,
-    /// The color of enabled pixels.
-    fill_color: Color32,
 }
 
 /// The duration of a single frame - the interpreter runs at 60 fps.
@@ -107,7 +112,13 @@ impl Emulator {
                         sink.pause();
                     }
                 }
+            } else {
+                // turn off sound
+                if !sink.is_paused() {
+                    sink.pause();
+                }
             }
+
             drop(chip8); // unlock the mutex for the gui
 
             // wait for the frame to end
@@ -124,10 +135,11 @@ impl Emulator {
             rom: vec![0],
             rom_path: String::new(),
             load_error: None,
+            show_load_modal: false,
             show_state: true,
             show_keys: true,
             show_ram: false,
-            show_rom: false,
+            show_rom_window: false,
             show_display_settings: false,
             background_color: Color32::BLACK,
             fill_color: Color32::WHITE,
@@ -217,7 +229,7 @@ impl eframe::App for Emulator {
             ctx,
             &mut self.show_state,
             &mut self.show_ram,
-            &mut self.show_rom,
+            &mut self.show_rom_window,
             &mut self.show_keys,
             &mut self.show_display_settings,
         );
@@ -233,17 +245,26 @@ impl eframe::App for Emulator {
         if self.show_ram {
             draw_ram(&interpreter, ctx);
         }
-        if self.show_rom {
-            draw_rom(&mut self.rom, &mut self.show_rom, ctx);
+        if self.show_rom_window {
+            draw_rom(&mut self.rom, &mut self.show_rom_window, ctx);
         }
         if self.show_keys {
             draw_keypad(&interpreter, ctx);
         }
+        if self.show_load_modal {
+            draw_load_modal(
+                &mut interpreter,
+                ctx,
+                &mut self.show_load_modal,
+                &mut self.rom,
+                &mut self.rom_path,
+                &mut self.load_error,
+            )
+        }
         draw_controls(
             &mut interpreter,
             &mut self.rom,
-            &mut self.rom_path,
-            &mut self.load_error,
+            &mut self.show_load_modal,
             ctx,
         );
 

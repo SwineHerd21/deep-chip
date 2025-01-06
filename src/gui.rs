@@ -1,12 +1,14 @@
-use std::fs;
+use std::{fs, io::Error, mem::swap};
 
 use deep_chip::{Chip8, Quirks};
 use egui::{
-    style::ScrollStyle, Align, Button, Color32, Frame, Grid, Label, Layout, Margin, RichText,
+    style::ScrollStyle, Align, Button, Color32, Frame, Grid, Id, Label, Layout, Margin, RichText,
     ScrollArea, Stroke, TextEdit, Vec2,
 };
 
-const PC_COLOR: Color32 = Color32::from_rgb(0, 120, 255);
+const PC_COLOR: Color32 = Color32::from_rgb(0, 100, 255);
+const I_COLOR: Color32 = Color32::from_rgb(50, 130, 0);
+const TEXT_COLOR: Color32 = Color32::from_gray(200);
 
 #[inline]
 pub fn draw_menu(
@@ -55,7 +57,7 @@ pub fn draw_menu(
                     ui.checkbox(
                         &mut interpreter.quirks.wait_for_vblank,
                         "Wait for vblank interrupt",
-                    ).on_hover_text("If true, the Dxyn opcode will wait for a vblank interrupt before drawing.\nIf false, the Dxyn opcode will draw immediately.");
+                    ).on_hover_text("If true, the Dxyn opcode will wait for a vblank interrupt (happens 60 times a second) before drawing.\nIf false, the Dxyn opcode will draw immediately.");
                 });
 
                 ui.menu_button("Settings", |ui| {
@@ -77,6 +79,49 @@ pub fn draw_menu(
 }
 
 #[inline]
+pub fn draw_load_modal(
+    interpreter: &mut Chip8,
+    ctx: &egui::Context,
+    show_load_modal: &mut bool,
+    rom: &mut Vec<u8>,
+    rom_path: &mut String,
+    load_error: &mut Option<Error>,
+) {
+    egui::Modal::new(Id::new("Load")).show(ctx, |ui| {
+        ui.heading("Load ROM");
+
+        ui.add(TextEdit::singleline(rom_path).hint_text("Enter path..."));
+
+        ui.horizontal(|ui| {
+            if ui.button("Load program").clicked() {
+                let loaded_rom = fs::read(&rom_path);
+                if let Err(e) = loaded_rom {
+                    *load_error = Some(e);
+                } else {
+                    *load_error = None;
+                    *rom = loaded_rom.unwrap();
+
+                    interpreter.reset();
+                    interpreter.load_program(&rom);
+
+                    *show_load_modal = false;
+                    rom_path.clear();
+                }
+            }
+
+            if ui.button("Cancel").clicked() {
+                *show_load_modal = false;
+                rom_path.clear();
+            }
+        });
+
+        if let Some(e) = load_error {
+            ui.label(format!("Could not load ROM: {e}"));
+        }
+    });
+}
+
+#[inline]
 pub fn draw_display_settings(
     ctx: &egui::Context,
     background_color: &mut Color32,
@@ -87,28 +132,46 @@ pub fn draw_display_settings(
         .open(open)
         .auto_sized()
         .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                let mut bg = [
-                    background_color.r(),
-                    background_color.g(),
-                    background_color.b(),
-                ];
-                ui.label("Background color");
-                ui.color_edit_button_srgb(&mut bg);
-                *background_color = Color32::from_rgb(bg[0], bg[1], bg[2]);
+            ui.scope_builder(egui::UiBuilder::new(), |ui| {
+                Grid::new("colors")
+                    .num_columns(2)
+                    .spacing([40.0, 4.0])
+                    .show(ui, |ui| {
+                        let mut bg = [
+                            background_color.r(),
+                            background_color.g(),
+                            background_color.b(),
+                        ];
+                        ui.label("Background color");
+                        ui.color_edit_button_srgb(&mut bg);
+                        *background_color = Color32::from_rgb(bg[0], bg[1], bg[2]);
+
+                        ui.end_row();
+                        let mut fill = [fill_color.r(), fill_color.g(), fill_color.b()];
+                        ui.label("Fill color");
+                        ui.color_edit_button_srgb(&mut fill);
+                        *fill_color = Color32::from_rgb(fill[0], fill[1], fill[2]);
+                    });
             });
 
-            ui.horizontal(|ui| {
-                let mut fill = [fill_color.r(), fill_color.g(), fill_color.b()];
-                ui.label("Fill color");
-                ui.color_edit_button_srgb(&mut fill);
-                *fill_color = Color32::from_rgb(fill[0], fill[1], fill[2]);
-            });
-
-            if ui.button("Default").clicked() {
-                *background_color = Color32::BLACK;
-                *fill_color = Color32::WHITE;
+            if ui.button("Swap").clicked() {
+                swap(background_color, fill_color);
             }
+
+            ui.horizontal(|ui| {
+                if ui.button("Default").clicked() {
+                    *background_color = Color32::BLACK;
+                    *fill_color = Color32::WHITE;
+                }
+                if ui.button("Octo").clicked() {
+                    *background_color = Color32::from_hex("#996600").unwrap();
+                    *fill_color = Color32::from_hex("#FFCC00").unwrap();
+                }
+                if ui.button("Matrix").clicked() {
+                    *background_color = Color32::BLACK;
+                    *fill_color = Color32::GREEN;
+                }
+            });
         });
 }
 
@@ -120,6 +183,8 @@ pub fn draw_rom(rom: &mut Vec<u8>, open: &mut bool, ctx: &egui::Context) {
         .resizable(true)
         .show(ctx, |ui| {
             ui.spacing_mut().scroll = ScrollStyle::solid();
+            ui.visuals_mut().override_text_color = Some(TEXT_COLOR);
+
             ScrollArea::vertical()
                 .scroll([false, true])
                 .auto_shrink(false)
@@ -139,8 +204,7 @@ pub fn draw_rom(rom: &mut Vec<u8>, open: &mut bool, ctx: &egui::Context) {
 pub fn draw_controls(
     interpreter: &mut Chip8,
     rom: &mut Vec<u8>,
-    rom_path: &mut String,
-    load_error: &mut Option<std::io::Error>,
+    show_load_modal: &mut bool,
     ctx: &egui::Context,
 ) {
     egui::TopBottomPanel::top("control panel")
@@ -149,35 +213,13 @@ pub fn draw_controls(
             ui.add_space(5.0);
 
             ui.horizontal(|ui| {
-                ui.add_enabled(
-                    !interpreter.running(),
-                    TextEdit::singleline(rom_path).hint_text("Enter path..."),
-                );
-
                 if ui
-                    .add_enabled(!interpreter.running(), Button::new("Load program"))
+                    .add_enabled(!interpreter.running(), Button::new("Load ROM"))
                     .clicked()
                 {
-                    let loaded_rom = fs::read(&rom_path);
-                    if let Err(e) = loaded_rom {
-                        *load_error = Some(e);
-                    } else {
-                        *load_error = None;
-                        *rom = loaded_rom.unwrap();
-
-                        interpreter.reset();
-                        interpreter.load_program(&rom);
-                    }
+                    *show_load_modal = true;
                 }
 
-                if let Some(e) = load_error {
-                    ui.label(format!("Could not load ROM: {e}"));
-                }
-            });
-
-            ui.add_space(5.0);
-
-            ui.horizontal(|ui| {
                 if interpreter.running() {
                     if ui.button("Pause").clicked() {
                         interpreter.stop();
@@ -216,8 +258,10 @@ pub fn draw_controls(
                     interpreter.reset();
                     interpreter.load_program(&rom);
                 }
+
+                ui.visuals_mut().override_text_color = Some(TEXT_COLOR);
                 if !interpreter.running() {
-                    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(format!(
                             "Cycle: {}/{}",
                             interpreter.frame_cycle,
@@ -248,6 +292,7 @@ pub fn draw_registers(interpreter: &Chip8, ctx: &egui::Context) {
             ui.label(RichText::new("Interpreter").heading());
             ui.separator();
 
+            ui.visuals_mut().override_text_color = Some(TEXT_COLOR);
             ui.horizontal(|ui| {
                 ui.label("Program counter:");
                 ui.colored_label(
@@ -264,7 +309,7 @@ pub fn draw_registers(interpreter: &Chip8, ctx: &egui::Context) {
             });
             ui.horizontal(|ui| {
                 ui.label("Index (I):");
-                ui.colored_label(Color32::YELLOW, format!("{:04X}", interpreter.get_i()));
+                ui.colored_label(I_COLOR, format!("{:04X}", interpreter.get_i()));
             });
 
             ui.horizontal(|ui| {
@@ -294,10 +339,14 @@ pub fn draw_registers(interpreter: &Chip8, ctx: &egui::Context) {
                                     format!("{:02X}", interpreter.get_register(i)),
                                 );
                             });
-                            ui.colored_label(
-                                Color32::YELLOW,
-                                format!("{:02X}", interpreter.read_stack(i)),
-                            );
+                            let stack_text =
+                                RichText::new(format!("{:02X}", interpreter.read_stack(i)))
+                                    .color(Color32::YELLOW);
+                            ui.label(if i == interpreter.get_stack_pointer() as usize {
+                                stack_text.underline() // Highlight the value the stack pointer is pointing to
+                            } else {
+                                stack_text
+                            });
                             ui.end_row();
                         }
                     });
@@ -330,9 +379,11 @@ pub fn draw_ram(interpreter: &Chip8, ctx: &egui::Context) {
                 .auto_shrink(false)
                 .show(ui, |ui| {
                     ui.horizontal_wrapped(|ui| {
+                        ui.visuals_mut().override_text_color = Some(TEXT_COLOR);
+
                         let mut bytes = String::new();
                         for i in 0..interpreter.ram_len() as u16 {
-                            if i == interpreter.get_program_counter() || i == interpreter.get_i() {
+                            if i == interpreter.get_program_counter() {
                                 bytes.pop(); // Remove space
                                 if !bytes.is_empty() {
                                     ui.label(&bytes);
@@ -349,14 +400,15 @@ pub fn draw_ram(interpreter: &Chip8, ctx: &egui::Context) {
                                     .background_color(PC_COLOR),
                                 );
                             // Highlight the place the index register is pointing to
-                            } else if i == interpreter.get_i() + 1 {
+                            } else if i == interpreter.get_i() {
+                                bytes.pop(); // Remove space
+                                if !bytes.is_empty() {
+                                    ui.label(&bytes);
+                                }
+                                bytes.clear();
                                 ui.label(
-                                    RichText::new(format!(
-                                        "{:02X} {:02X}",
-                                        interpreter.read_byte(i - 1),
-                                        interpreter.read_byte(i)
-                                    ))
-                                    .background_color(Color32::YELLOW),
+                                    RichText::new(format!("{:02X}", interpreter.read_byte(i)))
+                                        .background_color(I_COLOR),
                                 );
                             } else {
                                 bytes += &format!("{:02X} ", interpreter.read_byte(i));
@@ -381,6 +433,7 @@ pub fn draw_keypad(interpreter: &Chip8, ctx: &egui::Context) {
             ui.separator();
             ui.add_space(5.0);
             ui.spacing_mut().item_spacing = Vec2::new(-3.0, -1.0);
+            ui.visuals_mut().override_text_color = Some(TEXT_COLOR);
             Grid::new("keys").show(ui, |ui| {
                 draw_key(ui, "1", interpreter.get_key_state(1));
                 draw_key(ui, "2", interpreter.get_key_state(2));
