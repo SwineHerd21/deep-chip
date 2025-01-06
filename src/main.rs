@@ -103,14 +103,12 @@ impl Emulator {
                 chip8.tick_frame();
 
                 // play sound if enabled
-                if chip8.sound_on {
-                    if chip8.get_sound() > 1 {
-                        if sink.is_paused() {
-                            sink.play();
-                        }
-                    } else if !sink.is_paused() {
-                        sink.pause();
+                if chip8.sound_on && chip8.get_sound() > 1 {
+                    if sink.is_paused() {
+                        sink.play();
                     }
+                } else if !sink.is_paused() {
+                    sink.pause();
                 }
             } else {
                 // turn off sound

@@ -74,6 +74,11 @@ pub fn draw_menu(
                         ui.close_menu();
                     }
                 });
+
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.add_space(5.0);
+                    ui.label(format!("v{}", env!("CARGO_PKG_VERSION")));
+                });
             });
         });
 }
