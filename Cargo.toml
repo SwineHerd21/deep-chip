@@ -1,6 +1,6 @@
 [package]
-name = "deep-chip"
-version = "1.0.0"
+name = "e-chip"
+version = "1.1.0"
 edition = "2021"
 
 [dependencies]

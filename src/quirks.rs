@@ -1,14 +1,14 @@
-/// The desired quirks of the Chip-8 interpreter.
+/// The desired quirks of the CHIP-8 interpreter.
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 pub struct Quirks {
     /// If `true`, the `8xy1`, `8xy2` and `8xy3` opcodes will set VF to 0.  
-    /// If `true`, the `8xy1`, `8xy2` and `8xy3` opcodes will not modify VF.
+    /// If `false`, the `8xy1`, `8xy2` and `8xy3` opcodes will not modify VF.
     pub bitwise_reset_vf: bool,
     /// If `true`, the `8xy6` and `8xyE` opcodes will set Vx to Vx >> 1.  
     /// If `false`, the `8xy6` and `8xyE` opcodes will set Vx to Vy >> 1.
     pub direct_shifting: bool,
-    /// If `true`, the `Fx55` and `Fx65` opcodes will set I to I + x + 1.  
-    /// If `false`, the `Fx55` and `Fx65` opcodes will set I to I + x.
+    /// If `true`, the `Fx55` and `Fx65` opcodes will set I to I + x.  
+    /// If `false`, the `Fx55` and `Fx65` opcodes will set I to I + x + 1.
     pub save_load_increment: bool,
     /// If `true`, the `Bnnn` opcode will jump to nnn + V0.  
     /// If `false`, the `Bnnn` opcode will jump to nnn + Vx.
@@ -22,11 +22,11 @@ pub struct Quirks {
 }
 
 impl Quirks {
-    /// The quirks of the original CHIP-8 implementation on the COSMAC-VIP.  
+    /// The quirks of the original CHIP-8 implementation.  
     ///
     /// - bitwise_reset_vf: true
     /// - direct_shifting: false
-    /// - save_load_increment: true
+    /// - save_load_increment: false
     /// - jump_to_x: false
     /// - wait_for_vblank: true
     /// - edge_clipping: true
@@ -34,6 +34,25 @@ impl Quirks {
         Quirks {
             bitwise_reset_vf: true,
             direct_shifting: false,
+            save_load_increment: false,
+            jump_to_x: false,
+            wait_for_vblank: true,
+            edge_clipping: true,
+        }
+    }
+
+    /// The quirks of the SUPER-CHIP 1.1.  
+    ///
+    /// - bitwise_reset_vf: true
+    /// - direct_shifting: true
+    /// - save_load_increment: true
+    /// - jump_to_x: false
+    /// - wait_for_vblank: true
+    /// - edge_clipping: true
+    pub fn super_chip1_1() -> Quirks {
+        Quirks {
+            bitwise_reset_vf: true,
+            direct_shifting: true,
             save_load_increment: true,
             jump_to_x: false,
             wait_for_vblank: true,

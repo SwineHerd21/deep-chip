@@ -1,4 +1,4 @@
-/// The memory of the Chip-8.
+/// The memory of the CHIP-8.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 pub struct Memory {
     /// 4KB of RAM. 0x000-0x1FF is reserved for the interpreter.
@@ -47,6 +47,7 @@ impl Memory {
         self.ram[0x200..(0x200 + rom.len())].copy_from_slice(rom);
     }
 
+    /// Read two bytes at the passed address and combine them into an instruction.
     #[inline]
     pub fn read_opcode(&self, address: u16) -> u16 {
         (self.ram[address as usize] as u16) << 8 | self.ram[(address as usize) + 1] as u16

@@ -1,11 +1,11 @@
-# Deep-Chip
+# E-Chip
 
-Deep-Chip is a desktop CHIP-8 interpreter with real-time debug UI made with Rust and [egui](https://github.com/emilk/egui).
+E-Chip is a desktop CHIP-8 interpreter with real-time profiling UI made with Rust and [egui](https://github.com/emilk/egui).
 
 ![Showcase (an older version)](octotitle.gif)  
 (The gif is from an older version, the current UI looks differently)
 
-Deep-Chip supports all the original CHIP-8 features and passes all [tests by Timendus](https://github.com/Timendus/chip8-test-suite?tab=readme-ov-file#flags-test).
+E-Chip supports all the original CHIP-8 features and passes all [tests by Timendus](https://github.com/Timendus/chip8-test-suite?tab=readme-ov-file#flags-test).
 
 This emulator is actually my second attempt at this: the first one did not have a UI and I got stuck on vblanks and the `Fx0A` (wait for key) instruction.
 
@@ -24,10 +24,10 @@ In the future I may implement some of these other features:
 
 - SUPER-CHIP support
 - XO-CHIP support
-- The ability to edit registers, RAM, etc. with the UI
-- Better RAM view
+- Editing registers, RAM, etc. with the UI
+- Better UI layout
 - Loading ROMs with file system dialogs
-- WebAssembly
+- Web version
 - Custom quirk and color presets and persistent app settings
 
 # Usage
@@ -38,11 +38,11 @@ Press "Load ROM" and enter a path to a binary CHIP-8 ROM file to load it into th
 
 The "Quirks" tab allows configuration of interpreter quirks as specified in [Timendus' quirks test ROM](https://github.com/Timendus/chip8-test-suite?tab=readme-ov-file#quirks-test). The quirks have tooltips to explain what they do.
 
-The "Settings" tab allows the user to enable sound and open various inspection panels. Display settings let you customize the display colors (comes with a few presets).
+The "Settings" tab allows the user to enable sound and open various profiling panels. Display settings let you customize the display colors (comes with a few presets).
 
-# Inspection
+# Profiling
 
-DEEP-CHIP has several panels and windows that show the current state of the interpreter.
+E-Chip has several panels and windows that show the current state of the interpreter.
 
 ## Interpreter state
 
@@ -70,6 +70,7 @@ This window shows the ROM that is currently stored by the app and will be loaded
 
 [Timendus' CHIP-8 test suite](https://github.com/Timendus/chip8-test-suite) - testing the emulator and quirk reference  
 [CHIP-8 Variant Opcode Table](https://chip8.gulrak.net) - opcode and quirk reference  
+https://github.com/mattmikolay/chip-8/wiki/Mastering-CHIP‐8 - technical reference
 [Octo](https://johnearnest.github.io/Octo/) - implementation reference (`Dxyn` and `Fx0A`)  
 https://github.com/shonumi/Emu-Docs/tree/master - good emulator references  
 https://github.com/JohnEarnest/chip8Archive - CHIP-8 ROMs  

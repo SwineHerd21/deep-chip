@@ -9,8 +9,8 @@ mod display;
 mod memory;
 mod quirks;
 
-/// The Chip-8 interpreter context.
-#[derive(Debug, PartialEq, PartialOrd, Clone, Copy)]
+/// The CHIP-8 interpreter context.
+#[derive(Debug, PartialEq, PartialOrd, Clone)]
 #[allow(non_snake_case)]
 pub struct Chip8 {
     /// 16 general purpose 8-bit registers, usually referred to as Vx, where x is a hex digit.  
@@ -30,18 +30,24 @@ pub struct Chip8 {
     memory: Memory,
     /// A monochrome 64x32-pixel display.
     display: Display,
+    /// Applicable for SHIP mode: if false, the display will be treated as if the resolution was 64x32. Otherwise, the resolution will be 128x64.
+    pub highres: bool,
     /// 16 keys corresponding to hex digits.
     keypad: [bool; 16],
-    /// Stores return addresses for up to 16 nested subroutines.
-    stack: [u16; 16],
+    /// Stores return addresses for subroutines.
+    stack: Vec<u16>,
 
     // Configuration and control
-    /// The current cycle in a frame.
-    pub frame_cycle: u32,
+    /// What kind of CHIP-8 extension to run as.
+    pub mode: Mode,
     /// The desired implementation quirks.
     pub quirks: Quirks,
     /// Sound will play if true.
     pub sound_on: bool,
+    /// The size of the stack. 12 in CHIP-8 mode, 16 in SCHIP mode.
+    pub stack_size: usize,
+    /// The current cycle in a frame.
+    pub frame_cycle: u32,
     /// Whether the interpreter is executing instructions.
     running: bool,
     /// If true (and quirk is enabled), the display is ready for drawing.
@@ -52,10 +58,20 @@ pub struct Chip8 {
     key_destination: usize,
 }
 
+/// Determines what CHIP-8 extension to run as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Mode {
+    /// Run as a CHIP-8 interpreter
+    CHIP8,
+    /// Run as a SUPER-CHIP 1.1 interpreter
+    SCHIP11,
+}
+
 impl Chip8 {
-    /// Create a Chip8 interpreter with the quirks of the original COSMAC-VIP implementation.  
+    /// Create a CHIP-8 interpreter with the quirks of the original COSMAC-VIP implementation.  
     #[inline]
     pub fn chip8() -> Chip8 {
+        let stack_size = 12;
         Chip8 {
             // Registers
             V: [0; 16],
@@ -66,29 +82,55 @@ impl Chip8 {
             sound: 0,
             // Devices
             memory: Memory::new(),
-            display: Display::new(),
+            display: Display::small(),
+            highres: false,
             keypad: [false; 16],
-            stack: [0; 16],
+            stack: vec![0; stack_size],
             // Configuration
+            mode: Mode::CHIP8,
             quirks: Quirks::original_chip8(),
             frame_cycle: 0,
+            stack_size,
+            sound_on: false,
             running: false,
             vblank: true,
             awaiting_key: false,
             key_destination: 0,
-            sound_on: false,
         }
     }
 
+    /// Create a SUPER-CHIP 1.1 interpreter.  
     #[inline]
-    pub fn start(&mut self) {
-        self.running = true;
-    }
-    #[inline]
-    pub fn stop(&mut self) {
-        self.running = false;
+    pub fn super_chip1_1() -> Chip8 {
+        let stack_size = 16;
+        Chip8 {
+            // Registers
+            V: [0; 16],
+            I: 0,
+            program_counter: 0x200,
+            stack_pointer: 0,
+            delay: 0,
+            sound: 0,
+            // Devices
+            memory: Memory::new(),
+            display: Display::big(),
+            highres: false,
+            keypad: [false; 16],
+            stack: vec![0; stack_size],
+            // Configuration
+            mode: Mode::SCHIP11,
+            quirks: Quirks::super_chip1_1(),
+            frame_cycle: 0,
+            stack_size,
+            sound_on: false,
+            running: false,
+            vblank: true,
+            awaiting_key: false,
+            key_destination: 0,
+        }
     }
 
+    /// Set registers and timers to zero, clear the stack, screen and RAM and reload the ROM.
     #[inline]
     pub fn reset(&mut self) {
         self.V = [0; 16];
@@ -98,113 +140,87 @@ impl Chip8 {
         self.delay = 0;
         self.sound = 0;
         self.memory.reset();
-        self.display = Display::new();
+        self.display.clear();
         self.keypad = [false; 16];
-        self.stack = [0; 16];
+        self.stack.clear();
+        self.stack = vec![0; self.stack_size];
         self.awaiting_key = false;
     }
 
+    /// Set `running` to `true`.
     #[inline]
-    pub fn running(&self) -> bool {
-        self.running
+    pub fn start(&mut self) {
+        self.running = true;
+    }
+    /// Set `running` to `false`.
+    #[inline]
+    pub fn stop(&mut self) {
+        self.running = false;
     }
 
-    // Registers
-    #[inline]
-    pub fn get_register(&self, i: usize) -> u8 {
-        self.V[i]
-    }
+    /// Set the VF register. Basically boilerplate code.
     #[inline]
     fn set_flag(&mut self, value: u8) {
         self.V[0xF] = value;
     }
-    #[inline]
-    pub fn get_i(&self) -> u16 {
-        self.I
-    }
-    #[inline]
-    pub fn get_program_counter(&self) -> u16 {
-        self.program_counter
-    }
+    /// Move the program counter to the next instruction (increment by 2).
     #[inline]
     fn increment_program_counter(&mut self) {
         self.program_counter += 2
     }
-    #[inline]
-    pub fn get_stack_pointer(&self) -> u8 {
-        self.stack_pointer
-    }
-    #[inline]
-    pub fn read_stack(&self, i: usize) -> u16 {
-        self.stack[i]
-    }
-    #[inline]
-    pub fn get_delay(&self) -> u8 {
-        self.delay
-    }
-    #[inline]
-    pub fn get_sound(&self) -> u8 {
-        self.sound
-    }
+    /// Subtract one from the timers.
     #[inline]
     pub fn update_timers(&mut self) {
         self.delay = self.delay.saturating_sub(1);
         self.sound = self.sound.saturating_sub(1);
     }
 
-    // RAM
+    /// Get the opcode that the PC is pointing to.
     #[inline]
     pub fn get_current_opcode(&self) -> u16 {
-        self.memory.read_opcode(self.get_program_counter())
+        self.memory.read_opcode(self.program_counter)
     }
-    #[inline]
-    pub fn ram_len(&self) -> usize {
-        self.memory.ram.len()
-    }
+    /// Read a byte from memory.
     #[inline]
     pub fn read_byte(&self, address: u16) -> u8 {
         self.memory.ram[address as usize]
     }
+    /// Write a value to memory.
     #[inline]
     fn write_byte(&mut self, address: u16, value: u8) {
         self.memory.ram[address as usize] = value
     }
+    /// Reset memory and load a program into it, starting at 0x200.
     #[inline]
     pub fn load_program(&mut self, program: &[u8]) {
         self.memory.reset();
         self.memory.load_program(program);
     }
 
-    // Display
+    /// Read the display in the form of a texture.
     #[inline]
     pub fn get_display(&self, background_color: Color32, fill_color: Color32) -> egui::ColorImage {
         self.display.render(background_color, fill_color)
     }
+    /// Set vblank ready.
     #[inline]
     pub fn set_vblank(&mut self) {
         self.vblank = true;
     }
 
-    // Keypad
+    /// Set keypad state.
     #[inline]
     pub fn set_keys(&mut self, keys: [bool; 16]) {
         self.keypad = keys;
     }
-    #[inline]
-    pub fn get_key_state(&self, key: usize) -> bool {
-        self.keypad[key]
-    }
-    #[inline]
-    pub fn is_waiting_for_key(&self) -> bool {
-        self.awaiting_key
-    }
+    /// Save the value of the last pressed key into a register as the result of the Fx0A instruction.
     #[inline]
     pub fn save_awaited_key(&mut self, key: u8) {
         self.V[self.key_destination] = key;
         self.awaiting_key = false;
     }
 
-    /// A frame has completed: decrement the timers and set vblank.
+    /// Complete a frame: decrement timers and set vblank.
     pub fn tick_frame(&mut self) {
         self.update_timers();
         self.set_vblank();
@@ -213,7 +229,7 @@ impl Chip8 {
 
     /// Get the next instruction and execute it.
     pub fn execute_cycle(&mut self) {
-        if self.get_program_counter() >= self.memory.ram.len() as u16 - 2 {
+        if self.program_counter >= self.memory.ram.len() as u16 - 2 {
             self.stop();
             return;
         }
@@ -225,26 +241,32 @@ impl Chip8 {
         self.execute_instruction(instruction);
     }
 
-    /// Parse and execute the instruction.
+    /// Parse and execute an instruction.
     pub fn execute_instruction(&mut self, opcode: u16) {
         if self.awaiting_key {
             return;
         }
 
+        /* // Stop if reached 0x0000
+        if opcode == 0 {
+            self.running = false;
+            return;
+        } */
+
         let addr = opcode & 0x0FFF; // 0nnn
         let x = ((opcode & 0x0F00) >> 8) as usize; // 0x00
         let y = ((opcode & 0x00F0) >> 4) as usize; // 00y0
         let byte = (opcode & 0x00FF) as u8; // 00kk
-        let nibble = (opcode & 0x000F) as u8; // 0nnn
+        let nibble = (opcode & 0x000F) as u8; // 000n
 
         match opcode >> 12 {
             0x0 => match byte {
                 // 00E0 - Clear the screen
-                0xE0 => self.display.pixels = [false; 64 * 32],
+                0xE0 => self.display.clear(),
                 // 00EE - Return from subroutine
                 0xEE => {
-                    self.stack_pointer = self.get_stack_pointer().saturating_sub(1);
-                    self.program_counter = self.stack[self.get_stack_pointer() as usize];
+                    self.stack_pointer = self.stack_pointer.saturating_sub(1);
+                    self.program_counter = self.stack[self.stack_pointer as usize];
                     return;
                 }
                 _ => (),
@@ -256,40 +278,40 @@ impl Chip8 {
             }
             // 2nnn - Call subroutine at nnn
             0x2 => {
-                self.stack[self.get_stack_pointer() as usize] = self.get_program_counter() + 2;
-                self.stack_pointer = self.get_stack_pointer().saturating_add(1);
+                self.stack[self.stack_pointer as usize] = self.program_counter + 2;
+                self.stack_pointer = self.stack_pointer.saturating_add(1);
                 self.program_counter = addr;
                 return;
             }
             // 3xnn - Skip if Vx == nn
             0x3 => {
-                if self.get_register(x) == byte {
+                if self.V[x] == byte {
                     self.increment_program_counter();
                 }
             }
             // 4xnn - Skip if Vx != nn
             0x4 => {
-                if self.get_register(x) != byte {
+                if self.V[x] != byte {
                     self.increment_program_counter();
                 }
             }
             // 5xy0 - Skip if Vx == Vy
             0x5 if nibble == 0 => {
-                if self.get_register(x) == self.get_register(y) {
+                if self.V[x] == self.V[y] {
                     self.increment_program_counter();
                 }
             }
             // 6xnn - Set Vx = nn
             0x6 => self.V[x] = byte,
             // 7xnn - Set Vx += nn
-            0x7 => self.V[x] = self.get_register(x).wrapping_add(byte),
+            0x7 => self.V[x] = self.V[x].wrapping_add(byte),
             0x8 => match nibble {
                 // 8xy0 - Set Vx = Vy
                 0x0 => self.V[x] = self.V[y],
                 // 8xy1 - Set Vx |= Vy
                 // Set VF to 0 (quirk)
                 0x1 => {
-                    self.V[x] |= self.get_register(y);
+                    self.V[x] |= self.V[y];
                     if self.quirks.bitwise_reset_vf {
                         self.set_flag(0);
                     }
@@ -297,7 +319,7 @@ impl Chip8 {
                 // 8xy2 - Set Vx &= Vy
                 // Set VF to 0 (quirk)
                 0x2 => {
-                    self.V[x] &= self.get_register(y);
+                    self.V[x] &= self.V[y];
                     if self.quirks.bitwise_reset_vf {
                         self.set_flag(0);
                     }
@@ -305,7 +327,7 @@ impl Chip8 {
                 // 8xy3 - Set Vx ^= Vy
                 // Set VF to 0 (quirk)
                 0x3 => {
-                    self.V[x] ^= self.get_register(y);
+                    self.V[x] ^= self.V[y];
                     if self.quirks.bitwise_reset_vf {
                         self.set_flag(0);
                     }
@@ -313,7 +335,7 @@ impl Chip8 {
                 // 8xy4 - Set Vx += Vy, set VF to 1 if overflowed, to 0 if not
                 0x4 => {
                     let flag;
-                    (self.V[x], flag) = self.get_register(x).overflowing_add(self.get_register(y));
+                    (self.V[x], flag) = self.V[x].overflowing_add(self.V[y]);
                     if flag {
                         self.set_flag(1);
                     } else {
@@ -323,7 +345,7 @@ impl Chip8 {
                 // 8xy5 - Set Vx -= Vy, set VF to 0 if underflowed, to 1 if not
                 0x5 => {
                     let flag;
-                    (self.V[x], flag) = self.get_register(x).overflowing_sub(self.get_register(y));
+                    (self.V[x], flag) = self.V[x].overflowing_sub(self.V[y]);
                     if flag {
                         self.set_flag(0);
                     } else {
@@ -334,17 +356,17 @@ impl Chip8 {
                 // Or set Vx >>= 1 (quirk)
                 0x6 => {
                     if !self.quirks.direct_shifting {
-                        self.V[x] = self.get_register(y);
+                        self.V[x] = self.V[y];
                     }
 
-                    let shifted = self.get_register(x) & 1;
+                    let shifted = self.V[x] & 1;
                     self.V[x] >>= 1;
                     self.set_flag(shifted);
                 }
                 // 8xy7 - Set Vx = Vy - Vx, set VF to 0 if underflowed, to 1 if not
                 0x7 => {
                     let flag;
-                    (self.V[x], flag) = self.get_register(y).overflowing_sub(self.get_register(x));
+                    (self.V[x], flag) = self.V[y].overflowing_sub(self.V[x]);
                     if flag {
                         self.set_flag(0);
                     } else {
@@ -355,10 +377,10 @@ impl Chip8 {
                 // Or set Vx <<= 1 (quirk)
                 0xE => {
                     if !self.quirks.direct_shifting {
-                        self.V[x] = self.get_register(y);
+                        self.V[x] = self.V[y];
                     }
 
-                    let shifted = self.get_register(x) & 0b10000000;
+                    let shifted = self.V[x] & 0b10000000;
                     self.V[x] <<= 1;
                     self.set_flag(shifted >> 7);
                 }
@@ -366,7 +388,7 @@ impl Chip8 {
             },
             // 9xy0 - Skip if Vx != Vy
             0x9 if nibble == 0 => {
-                if self.get_register(x) != self.get_register(y) {
+                if self.V[x] != self.V[y] {
                     self.increment_program_counter();
                 }
             }
@@ -377,9 +399,9 @@ impl Chip8 {
             0xB => {
                 self.program_counter = addr
                     + if self.quirks.jump_to_x {
-                        self.get_register(x)
+                        self.V[x]
                     } else {
-                        self.get_register(0)
+                        self.V[0]
                     } as u16;
                 return;
             }
@@ -392,12 +414,24 @@ impl Chip8 {
                     return;
                 }
 
+                /*
+                    I tried to do this by actually XORing the target pixel with the sprite pixel for
+                    a while, but I could not pass the clipping test. I always got ERR2 and I did not
+                    know why.
+                    I gave up and looked at how Octo does this. I copied the part before the pixel
+                    setting, but it still did not work. I then copied the rest and run the test.
+
+                    It passed.
+
+                    I have no idea why this way works but my way did not.
+                */
+
                 let mut overlap = false;
                 for row in 0..nibble as u16 {
-                    let sprite_byte = self.memory.ram[self.get_i() as usize + row as usize];
+                    let sprite_byte = self.memory.ram[self.I as usize + row as usize];
                     for cell in 0..8 {
-                        let dx = self.get_register(x) as u16;
-                        let dy = self.get_register(y) as u16;
+                        let dx = self.V[x] as u16;
+                        let dy = self.V[y] as u16;
 
                         if self.quirks.edge_clipping && (dx % 64 + cell > 63 || dy % 32 + row > 31)
                         {
@@ -423,13 +457,13 @@ impl Chip8 {
             0xE => match byte {
                 // Ex9E - Skip if key Vx is down
                 0x9E => {
-                    if self.keypad[(self.get_register(x) & 0x0F) as usize] {
+                    if self.keypad[(self.V[x] & 0x0F) as usize] {
                         self.increment_program_counter();
                     }
                 }
                 // ExA1 - Skip if key Vx is up
                 0xA1 => {
-                    if !self.keypad[(self.get_register(x) & 0x0F) as usize] {
+                    if !self.keypad[(self.V[x] & 0x0F) as usize] {
                         self.increment_program_counter();
                     }
                 }
@@ -437,48 +471,48 @@ impl Chip8 {
             },
             0xF => match byte {
                 // Ex07 - Set Vx to delay
-                0x07 => self.V[x] = self.get_delay(),
+                0x07 => self.V[x] = self.delay,
                 // Fx0A - Wait for a key pressed and released and set it to Vx
                 0x0A => {
                     self.awaiting_key = true;
                     self.key_destination = x;
                 }
                 // Fx15 - Set delay to Vx
-                0x15 => self.delay = self.get_register(x),
+                0x15 => self.delay = self.V[x],
                 // Fx18 - Set sound to Vx
-                0x18 => self.sound = self.get_register(x),
+                0x18 => self.sound = self.V[x],
                 // Fx1E - Set I += Vx
-                0x1E => self.I += self.get_register(x) as u16,
+                0x1E => self.I += self.V[x] as u16,
                 // Fx29 - Set I to the address of the font sprite for Vx's lowest nibble
-                0x29 => self.I = (self.get_register(x) as u16) % 16 * 5,
+                0x29 => self.I = (self.V[x] as u16) % 16 * 5,
                 // Fx33 - Write Vx as BCD to addresses I, I+1 and I+2
                 0x33 => {
-                    self.write_byte(self.get_i(), self.get_register(x) / 100);
-                    self.write_byte(self.get_i() + 1, (self.get_register(x) / 10) % 10);
-                    self.write_byte(self.get_i() + 2, (self.get_register(x) % 100) % 10);
+                    self.write_byte(self.I, self.V[x] / 100);
+                    self.write_byte(self.I + 1, (self.V[x] / 10) % 10);
+                    self.write_byte(self.I + 2, (self.V[x] % 100) % 10);
                 }
                 // Fx55 - Write V0 to Vx to addresses I to I+x, I is incremented by x
                 // Or I is incremented by x+1 (quirk)
                 0x55 => {
                     for i in 0..=x {
-                        self.write_byte(self.get_i() + i as u16, self.get_register(i));
+                        self.write_byte(self.I + i as u16, self.V[i]);
                     }
                     self.I += if self.quirks.save_load_increment {
-                        x as u16 + 1
-                    } else {
                         x as u16
+                    } else {
+                        x as u16 + 1
                     };
                 }
                 // Fx65 - Read from addresses I to I+x to V0 to Vx, I is incremented by x
                 // Or I is incremented by x+1 (quirk)
                 0x65 => {
                     for i in 0..=x {
-                        self.V[i] = self.read_byte(self.get_i() + i as u16);
+                        self.V[i] = self.read_byte(self.I + i as u16);
                     }
                     self.I += if self.quirks.save_load_increment {
-                        x as u16 + 1
-                    } else {
                         x as u16
+                    } else {
+                        x as u16 + 1
                     };
                 }
                 _ => (),
@@ -486,5 +520,75 @@ impl Chip8 {
             _ => (),
         }
         self.increment_program_counter();
+    }
+}
+
+/// Functions for state inspection.
+impl Chip8 {
+    /// Check if `running` is `true`. For the inspector.
+    #[inline]
+    pub fn is_running(&self) -> bool {
+        self.running
+    }
+    /// Get register V`i`. For the inspector.
+    #[inline]
+    pub fn get_register(&self, i: usize) -> u8 {
+        self.V[i]
+    }
+    /// Get register I. For the inspector.
+    #[inline]
+    pub fn get_i(&self) -> u16 {
+        self.I
+    }
+    /// Get the program counter. For the inspector.
+    #[inline]
+    pub fn get_program_counter(&self) -> u16 {
+        self.program_counter
+    }
+    /// Get the stack pointer. For the inspector.
+    #[inline]
+    pub fn get_stack_pointer(&self) -> u8 {
+        self.stack_pointer
+    }
+    /// Get the length of the stack. 12 for CHIP-8, 16 for SUPER-CHIP and XO-CHIP. For the inspector.
+    #[inline]
+    pub fn get_stack_size(&self) -> usize {
+        self.stack_size
+    }
+    /// Get the `i`th value in the stack. For the inspector.
+    #[inline]
+    pub fn read_stack(&self, i: usize) -> u16 {
+        self.stack[i]
+    }
+    /// Get the delay timer. For the inspector.
+    #[inline]
+    pub fn get_delay(&self) -> u8 {
+        self.delay
+    }
+    /// Get the sound timer. For the inspector.
+    #[inline]
+    pub fn get_sound(&self) -> u8 {
+        self.sound
+    }
+    /// Get the length of RAM. For the inspector.
+    #[inline]
+    pub fn ram_len(&self) -> usize {
+        self.memory.ram.len()
+    }
+    /// Get the index of the register where the next key press will be saved as a result of the Fx0A instruction.
+    /// For the inspector.
+    #[inline]
+    pub fn get_key_destination_register(&self) -> usize {
+        self.key_destination
+    }
+    /// Get the state of key `i` on the keypad. For the inspector.
+    #[inline]
+    pub fn get_key_state(&self, key: usize) -> bool {
+        self.keypad[key]
+    }
+    /// Check if the interpreter is waiting for a key press with the Fx0A instruction. For the inspector.
+    #[inline]
+    pub fn is_waiting_for_key(&self) -> bool {
+        self.awaiting_key
     }
 }

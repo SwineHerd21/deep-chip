@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use deep_chip::Chip8;
+use e_chip::Chip8;
 use eframe::egui;
 use egui::{Color32, ColorImage, TextureHandle, TextureOptions};
 use gui::*;
@@ -34,9 +34,12 @@ fn main() {
     sink.pause();
 
     eframe::run_native(
-        "DEEP-CHIP",
+        "E-CHIP",
         eframe::NativeOptions {
-            viewport: egui::ViewportBuilder::default().with_inner_size([1060.0, 630.0]),
+            viewport: egui::ViewportBuilder::default()
+                .with_inner_size([875.0, 520.0])
+                //.with_maximize_button(false)
+                .with_resizable(false),
             ..Default::default()
         },
         Box::new(|cc| {
@@ -49,6 +52,7 @@ fn main() {
     .unwrap();
 }
 
+/// The app.
 struct Emulator {
     /// Access to the interpreter.
     interpreter: Arc<Mutex<Chip8>>,
@@ -69,12 +73,6 @@ struct Emulator {
     /// Whether to show the load ROM modal
     show_load_modal: bool,
 
-    /// Whether to show the interpreter state panel.
-    show_state: bool,
-    /// Whether to show the keypad state panel.
-    show_keys: bool,
-    /// Whether to show the RAM panel.
-    show_ram: bool,
     /// Whether to show the ROM window.
     show_rom_window: bool,
     /// Whether to show the display settings window.
@@ -84,7 +82,7 @@ struct Emulator {
 /// The duration of a single frame - the interpreter runs at 60 fps.
 const FRAME_DURATION: Duration = Duration::from_millis(1000 / 60);
 /// How many interpreter cycles to run in a frame.
-pub const CYCLES_PER_FRAME: u32 = 500;
+pub const CYCLES_PER_FRAME: u32 = 20;
 
 impl Emulator {
     fn new(interpreter: Arc<Mutex<Chip8>>, sink: Sink, ctx: &egui::Context) -> Self {
@@ -95,7 +93,7 @@ impl Emulator {
         thread::spawn(move || loop {
             let mut chip8 = clone.lock().unwrap();
 
-            if chip8.running() {
+            if chip8.is_running() {
                 for _ in 0..CYCLES_PER_FRAME {
                     chip8.execute_cycle();
                 }
@@ -134,9 +132,6 @@ impl Emulator {
             rom_path: String::new(),
             load_error: None,
             show_load_modal: false,
-            show_state: true,
-            show_keys: true,
-            show_ram: false,
             show_rom_window: false,
             show_display_settings: false,
             background_color: Color32::BLACK,
@@ -151,6 +146,7 @@ impl eframe::App for Emulator {
 
         // read the keyboard and update the interpreter's keys
         ctx.input(|i| {
+            // Save the last pressed and released key if executing the Fx0A instruction.
             if interpreter.is_waiting_for_key() {
                 if i.key_released(egui::Key::X) {
                     interpreter.save_awaited_key(0);
@@ -225,10 +221,7 @@ impl eframe::App for Emulator {
         draw_menu(
             &mut interpreter,
             ctx,
-            &mut self.show_state,
-            &mut self.show_ram,
             &mut self.show_rom_window,
-            &mut self.show_keys,
             &mut self.show_display_settings,
         );
         draw_display_settings(
@@ -237,17 +230,11 @@ impl eframe::App for Emulator {
             &mut self.fill_color,
             &mut self.show_display_settings,
         );
-        if self.show_state {
-            draw_registers(&interpreter, ctx);
-        }
-        if self.show_ram {
-            draw_ram(&interpreter, ctx);
-        }
+        draw_ram(&interpreter, ctx);
+        draw_registers_and_keypad(&interpreter, ctx);
+
         if self.show_rom_window {
             draw_rom(&mut self.rom, &mut self.show_rom_window, ctx);
-        }
-        if self.show_keys {
-            draw_keypad(&interpreter, ctx);
         }
         if self.show_load_modal {
             draw_load_modal(
@@ -275,7 +262,7 @@ impl eframe::App for Emulator {
             ui.centered_and_justified(|ui| ui.image((self.screen.id(), self.screen.size_vec2())));
         });
 
-        if interpreter.running() {
+        if interpreter.is_running() {
             ctx.request_repaint();
         }
     }
