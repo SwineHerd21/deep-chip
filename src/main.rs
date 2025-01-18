@@ -3,7 +3,7 @@
 use std::{
     sync::{Arc, Mutex},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use e_chip::Chip8;
@@ -38,7 +38,7 @@ fn main() {
         eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
                 .with_inner_size([875.0, 520.0])
-                //.with_maximize_button(false)
+                .with_maximize_button(false)
                 .with_resizable(false),
             ..Default::default()
         },
@@ -80,7 +80,7 @@ struct Emulator {
 }
 
 /// The duration of a single frame - the interpreter runs at 60 fps.
-const FRAME_DURATION: Duration = Duration::from_millis(1000 / 60);
+const FRAME_DURATION: Duration = Duration::from_nanos(16666667);
 /// How many interpreter cycles to run in a frame.
 pub const CYCLES_PER_FRAME: u32 = 20;
 
@@ -92,6 +92,8 @@ impl Emulator {
         let clone = Arc::clone(&interpreter);
         thread::spawn(move || loop {
             let mut chip8 = clone.lock().unwrap();
+
+            let frame_start = Instant::now();
 
             if chip8.is_running() {
                 for _ in 0..CYCLES_PER_FRAME {
@@ -117,8 +119,7 @@ impl Emulator {
 
             drop(chip8); // unlock the mutex for the gui
 
-            // wait for the frame to end
-            thread::sleep(FRAME_DURATION);
+            while frame_start.elapsed() < FRAME_DURATION {} // wait for frame to end
         });
 
         Self {
@@ -257,7 +258,7 @@ impl eframe::App for Emulator {
         egui::CentralPanel::default().show(ctx, |ui| {
             self.screen.set(
                 interpreter.get_display(self.background_color, self.fill_color),
-                TextureOptions::NEAREST,
+                TextureOptions::LINEAR,
             );
             ui.centered_and_justified(|ui| ui.image((self.screen.id(), self.screen.size_vec2())));
         });
