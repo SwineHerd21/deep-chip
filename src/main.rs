@@ -2,13 +2,13 @@
 
 use std::{
     sync::{Arc, Mutex},
-    thread,
+    thread::{self, sleep},
     time::{Duration, Instant},
 };
 
 use e_chip::Chip8;
 use eframe::egui;
-use egui::{Color32, ColorImage, TextureHandle, TextureOptions};
+use egui::{Color32, ColorImage, Key, Modifiers, TextureHandle, TextureOptions};
 use gui::*;
 use rodio::{
     source::{self, SignalGenerator},
@@ -37,7 +37,7 @@ fn main() {
         "E-CHIP",
         eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
-                .with_inner_size([875.0, 520.0])
+                .with_inner_size([925.0, 550.0])
                 .with_maximize_button(false)
                 .with_resizable(false),
             ..Default::default()
@@ -81,8 +81,6 @@ struct Emulator {
 
 /// The duration of a single frame - the interpreter runs at 60 fps.
 const FRAME_DURATION: Duration = Duration::from_nanos(16666667);
-/// How many interpreter cycles to run in a frame.
-pub const CYCLES_PER_FRAME: u32 = 20;
 
 impl Emulator {
     fn new(interpreter: Arc<Mutex<Chip8>>, sink: Sink, ctx: &egui::Context) -> Self {
@@ -90,14 +88,17 @@ impl Emulator {
 
         // The interpreter thread
         let clone = Arc::clone(&interpreter);
-        thread::spawn(move || loop {
+        thread::spawn(move || 'main: loop {
             let mut chip8 = clone.lock().unwrap();
 
-            let frame_start = Instant::now();
-
             if chip8.is_running() {
-                for _ in 0..CYCLES_PER_FRAME {
+                let frame_start = Instant::now();
+
+                for _ in 0..chip8.execution_speed {
                     chip8.execute_cycle();
+                    if !chip8.is_running() {
+                        continue 'main;
+                    }
                 }
 
                 chip8.tick_frame();
@@ -110,16 +111,16 @@ impl Emulator {
                 } else if !sink.is_paused() {
                     sink.pause();
                 }
+
+                drop(chip8); // unlock the mutex for the gui
+
+                sleep(FRAME_DURATION.saturating_sub(frame_start.elapsed())); // wait for frame to end
             } else {
                 // turn off sound
                 if !sink.is_paused() {
                     sink.pause();
                 }
             }
-
-            drop(chip8); // unlock the mutex for the gui
-
-            while frame_start.elapsed() < FRAME_DURATION {} // wait for frame to end
         });
 
         Self {
@@ -127,7 +128,7 @@ impl Emulator {
             screen: ctx.load_texture(
                 "screen",
                 ColorImage::new([64 * 10, 32 * 10], Color32::BLACK),
-                Default::default(),
+                TextureOptions::NEAREST,
             ),
             rom: vec![0],
             rom_path: String::new(),
@@ -146,77 +147,114 @@ impl eframe::App for Emulator {
         let mut interpreter = self.interpreter.lock().unwrap();
 
         // read the keyboard and update the interpreter's keys
-        ctx.input(|i| {
-            // Save the last pressed and released key if executing the Fx0A instruction.
-            if interpreter.is_waiting_for_key() {
-                if i.key_released(egui::Key::X) {
-                    interpreter.save_awaited_key(0);
+        ctx.input_mut(|i| {
+            // Emulator hotkeys
+            if interpreter.is_running() {
+                if i.consume_key(Modifiers::NONE, Key::Space) {
+                    interpreter.stop();
                 }
-                if i.key_released(egui::Key::Num1) {
-                    interpreter.save_awaited_key(1);
-                }
-                if i.key_released(egui::Key::Num2) {
-                    interpreter.save_awaited_key(2);
-                }
-                if i.key_released(egui::Key::Num3) {
-                    interpreter.save_awaited_key(3);
-                }
-                if i.key_released(egui::Key::Q) {
-                    interpreter.save_awaited_key(4);
-                }
-                if i.key_released(egui::Key::W) {
-                    interpreter.save_awaited_key(5);
-                }
-                if i.key_released(egui::Key::E) {
-                    interpreter.save_awaited_key(6);
-                }
-                if i.key_released(egui::Key::A) {
-                    interpreter.save_awaited_key(7);
-                }
-                if i.key_released(egui::Key::S) {
-                    interpreter.save_awaited_key(8);
-                }
-                if i.key_released(egui::Key::D) {
-                    interpreter.save_awaited_key(9);
-                }
-                if i.key_released(egui::Key::Z) {
-                    interpreter.save_awaited_key(10);
-                }
-                if i.key_released(egui::Key::C) {
-                    interpreter.save_awaited_key(11);
-                }
-                if i.key_released(egui::Key::Num4) {
-                    interpreter.save_awaited_key(12);
-                }
-                if i.key_released(egui::Key::R) {
-                    interpreter.save_awaited_key(13);
-                }
-                if i.key_released(egui::Key::F) {
-                    interpreter.save_awaited_key(14);
-                }
-                if i.key_released(egui::Key::V) {
-                    interpreter.save_awaited_key(15);
+            } else {
+                // Controls
+                if i.consume_key(Modifiers::NONE, Key::Space) {
+                    interpreter.start();
+                } else if i.consume_key(Modifiers::SHIFT, Key::Period) {
+                    for _ in interpreter.frame_cycle..interpreter.execution_speed {
+                        interpreter.execute_cycle();
+                    }
+                    interpreter.tick_frame();
+                } else if i.consume_key(Modifiers::NONE, Key::Period) {
+                    interpreter.execute_cycle();
+                    if interpreter.frame_cycle == interpreter.execution_speed {
+                        interpreter.tick_frame();
+                    }
+                } else if i.consume_key(Modifiers::CTRL, Key::R) {
+                    interpreter.reset();
+                } else if i.consume_key(Modifiers::CTRL, Key::O) {
+                    self.show_load_modal = true;
                 }
             }
+            // Utility
+            if i.consume_key(Modifiers::CTRL, Key::P) {
+                self.show_rom_window = true;
+            } else if i.consume_key(Modifiers::CTRL, Key::D) {
+                self.show_display_settings = true;
+            } else if i.consume_key(Modifiers::CTRL, Key::S) {
+                interpreter.sound_on = !interpreter.sound_on;
+            }
 
-            interpreter.set_keys([
-                i.key_down(egui::Key::X),    // 0
-                i.key_down(egui::Key::Num1), // 1
-                i.key_down(egui::Key::Num2), // 2
-                i.key_down(egui::Key::Num3), // 3
-                i.key_down(egui::Key::Q),    // 4
-                i.key_down(egui::Key::W),    // 5
-                i.key_down(egui::Key::E),    // 6
-                i.key_down(egui::Key::A),    // 7
-                i.key_down(egui::Key::S),    // 8
-                i.key_down(egui::Key::D),    // 9
-                i.key_down(egui::Key::Z),    // A
-                i.key_down(egui::Key::C),    // B
-                i.key_down(egui::Key::Num4), // C
-                i.key_down(egui::Key::R),    // D
-                i.key_down(egui::Key::F),    // E
-                i.key_down(egui::Key::V),    // F
-            ])
+            // We don't want to press keys on the interpreter while using emulator shortcuts
+            if !i.modifiers.any() {
+                // Save the last pressed and released key if executing the Fx0A instruction.
+                if interpreter.is_waiting_for_key() {
+                    if i.key_released(egui::Key::X) {
+                        interpreter.save_awaited_key(0);
+                    }
+                    if i.key_released(egui::Key::Num1) {
+                        interpreter.save_awaited_key(1);
+                    }
+                    if i.key_released(egui::Key::Num2) {
+                        interpreter.save_awaited_key(2);
+                    }
+                    if i.key_released(egui::Key::Num3) {
+                        interpreter.save_awaited_key(3);
+                    }
+                    if i.key_released(egui::Key::Q) {
+                        interpreter.save_awaited_key(4);
+                    }
+                    if i.key_released(egui::Key::W) {
+                        interpreter.save_awaited_key(5);
+                    }
+                    if i.key_released(egui::Key::E) {
+                        interpreter.save_awaited_key(6);
+                    }
+                    if i.key_released(egui::Key::A) {
+                        interpreter.save_awaited_key(7);
+                    }
+                    if i.key_released(egui::Key::S) {
+                        interpreter.save_awaited_key(8);
+                    }
+                    if i.key_released(egui::Key::D) {
+                        interpreter.save_awaited_key(9);
+                    }
+                    if i.key_released(egui::Key::Z) {
+                        interpreter.save_awaited_key(10);
+                    }
+                    if i.key_released(egui::Key::C) {
+                        interpreter.save_awaited_key(11);
+                    }
+                    if i.key_released(egui::Key::Num4) {
+                        interpreter.save_awaited_key(12);
+                    }
+                    if i.key_released(egui::Key::R) {
+                        interpreter.save_awaited_key(13);
+                    }
+                    if i.key_released(egui::Key::F) {
+                        interpreter.save_awaited_key(14);
+                    }
+                    if i.key_released(egui::Key::V) {
+                        interpreter.save_awaited_key(15);
+                    }
+                }
+
+                interpreter.set_keys([
+                    i.key_down(egui::Key::X),    // 0
+                    i.key_down(egui::Key::Num1), // 1
+                    i.key_down(egui::Key::Num2), // 2
+                    i.key_down(egui::Key::Num3), // 3
+                    i.key_down(egui::Key::Q),    // 4
+                    i.key_down(egui::Key::W),    // 5
+                    i.key_down(egui::Key::E),    // 6
+                    i.key_down(egui::Key::A),    // 7
+                    i.key_down(egui::Key::S),    // 8
+                    i.key_down(egui::Key::D),    // 9
+                    i.key_down(egui::Key::Z),    // A
+                    i.key_down(egui::Key::C),    // B
+                    i.key_down(egui::Key::Num4), // C
+                    i.key_down(egui::Key::R),    // D
+                    i.key_down(egui::Key::F),    // E
+                    i.key_down(egui::Key::V),    // F
+                ]);
+            }
         });
 
         draw_menu(
@@ -247,6 +285,7 @@ impl eframe::App for Emulator {
                 &mut self.load_error,
             )
         }
+        draw_mode_specifics(&mut interpreter, &self.rom, ctx);
         draw_controls(
             &mut interpreter,
             &mut self.rom,
@@ -260,6 +299,15 @@ impl eframe::App for Emulator {
                 interpreter.get_display(self.background_color, self.fill_color),
                 TextureOptions::LINEAR,
             );
+            ui.add_space(-5.0);
+            if let Some(msg) = &interpreter.halt_message {
+                ui.with_layout(
+                    egui::Layout::top_down_justified(egui::Align::Center),
+                    |ui| {
+                        ui.colored_label(Color32::RED, format!("Halted: {}", msg));
+                    },
+                );
+            }
             ui.centered_and_justified(|ui| ui.image((self.screen.id(), self.screen.size_vec2())));
         });
 

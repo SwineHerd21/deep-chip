@@ -1,8 +1,11 @@
-use display::Display;
+use std::fs;
+
+use display::{Display, ScrollDirection};
 use egui::Color32;
 use memory::Memory;
 use rand::Rng;
 
+pub use quirks::Mode;
 pub use quirks::Quirks;
 
 mod display;
@@ -30,7 +33,8 @@ pub struct Chip8 {
     memory: Memory,
     /// A monochrome 64x32-pixel display.
     display: Display,
-    /// Applicable for SHIP mode: if false, the display will be treated as if the resolution was 64x32. Otherwise, the resolution will be 128x64.
+    /// Applicable for SUPER-CHIP mode: if false, the display will be treated as if the resolution was 64x32.
+    /// Otherwise, the resolution will be 128x64.
     pub highres: bool,
     /// 16 keys corresponding to hex digits.
     keypad: [bool; 16],
@@ -48,23 +52,20 @@ pub struct Chip8 {
     pub stack_size: usize,
     /// The current cycle in a frame.
     pub frame_cycle: u32,
+    /// How many cycles to execute in one frame.
+    pub execution_speed: u32,
     /// Whether the interpreter is executing instructions.
     running: bool,
+    /// If the interpreter halts, this will have a message explaining why.
+    pub halt_message: Option<String>,
     /// If true (and quirk is enabled), the display is ready for drawing.
     vblank: bool,
     /// True if waiting for a key press with the Fx0A instruction.
     awaiting_key: bool,
     /// Used by the Fx0A instruction: The register to which the pressed key will be saved.
     key_destination: usize,
-}
-
-/// Determines what CHIP-8 extension to run as.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Mode {
-    /// Run as a CHIP-8 interpreter
-    CHIP8,
-    /// Run as a SUPER-CHIP 1.1 interpreter
-    SCHIP11,
+    /// Used by the Fx75 and Fx85 instructions of SUPER-CHIP and XO-CHIP as runtime storage.
+    persistent_flags: [u8; 8],
 }
 
 impl Chip8 {
@@ -88,14 +89,17 @@ impl Chip8 {
             stack: vec![0; stack_size],
             // Configuration
             mode: Mode::CHIP8,
-            quirks: Quirks::original_chip8(),
+            quirks: Quirks::vip_chip(),
             frame_cycle: 0,
+            execution_speed: 15,
             stack_size,
-            sound_on: false,
+            sound_on: true,
             running: false,
+            halt_message: None,
             vblank: true,
             awaiting_key: false,
             key_destination: 0,
+            persistent_flags: [0; 8],
         }
     }
 
@@ -113,7 +117,7 @@ impl Chip8 {
             sound: 0,
             // Devices
             memory: Memory::new(),
-            display: Display::big(),
+            display: Display::small(),
             highres: false,
             keypad: [false; 16],
             stack: vec![0; stack_size],
@@ -121,12 +125,15 @@ impl Chip8 {
             mode: Mode::SCHIP11,
             quirks: Quirks::super_chip1_1(),
             frame_cycle: 0,
+            execution_speed: 30,
             stack_size,
-            sound_on: false,
+            sound_on: true,
             running: false,
+            halt_message: None,
             vblank: true,
             awaiting_key: false,
             key_destination: 0,
+            persistent_flags: Chip8::load_persistent_flags(),
         }
     }
 
@@ -141,10 +148,13 @@ impl Chip8 {
         self.sound = 0;
         self.memory.reset();
         self.display.clear();
+        self.highres = false;
         self.keypad = [false; 16];
-        self.stack.clear();
         self.stack = vec![0; self.stack_size];
         self.awaiting_key = false;
+        self.frame_cycle = 0;
+        self.vblank = true;
+        self.halt_message = None;
     }
 
     /// Set `running` to `true`.
@@ -177,12 +187,12 @@ impl Chip8 {
 
     /// Get the opcode that the PC is pointing to.
     #[inline]
-    pub fn get_current_opcode(&self) -> u16 {
+    pub const fn get_current_opcode(&self) -> u16 {
         self.memory.read_opcode(self.program_counter)
     }
     /// Read a byte from memory.
     #[inline]
-    pub fn read_byte(&self, address: u16) -> u8 {
+    pub const fn read_byte(&self, address: u16) -> u8 {
         self.memory.ram[address as usize]
     }
     /// Write a value to memory.
@@ -195,6 +205,28 @@ impl Chip8 {
     pub fn load_program(&mut self, program: &[u8]) {
         self.memory.reset();
         self.memory.load_program(program);
+    }
+
+    /// Load persistent flag registers from a file.
+    #[inline]
+    pub fn load_persistent_flags() -> [u8; 8] {
+        let mut flags = [0; 8];
+        if let Ok(f) = fs::read("flags.dat") {
+            for i in 0..8 {
+                flags[i] = f[i];
+            }
+        } else {
+            println!("Did not find a persistent flag file");
+        }
+        return flags;
+    }
+
+    /// Save persistent flag registers into a file.
+    #[inline]
+    pub fn save_persistent_flags(&self) {
+        if let Err(e) = fs::write("flags.dat", self.persistent_flags) {
+            panic!("Could not save persistent flags! What is wrong with your file system? {e}");
+        }
     }
 
     /// Read the display in the form of a texture.
@@ -229,6 +261,8 @@ impl Chip8 {
 
     /// Get the next instruction and execute it.
     pub fn execute_cycle(&mut self) {
+        self.halt_message = None;
+
         if self.program_counter >= self.memory.ram.len() as u16 - 2 {
             self.stop();
             return;
@@ -247,12 +281,6 @@ impl Chip8 {
             return;
         }
 
-        /* // Stop if reached 0x0000
-        if opcode == 0 {
-            self.running = false;
-            return;
-        } */
-
         let addr = opcode & 0x0FFF; // 0nnn
         let x = ((opcode & 0x0F00) >> 8) as usize; // 0x00
         let y = ((opcode & 0x00F0) >> 4) as usize; // 00y0
@@ -260,17 +288,56 @@ impl Chip8 {
         let nibble = (opcode & 0x000F) as u8; // 000n
 
         match opcode >> 12 {
-            0x0 => match byte {
-                // 00E0 - Clear the screen
-                0xE0 => self.display.clear(),
-                // 00EE - Return from subroutine
-                0xEE => {
-                    self.stack_pointer = self.stack_pointer.saturating_sub(1);
-                    self.program_counter = self.stack[self.stack_pointer as usize];
-                    return;
+            0x0 => {
+                // Reached empty code, just stop
+                if opcode == 0x0000 {
+                    self.stop();
                 }
-                _ => (),
-            },
+                // 00Cn - Scroll down by n pixels (SUPER-CHIP)
+                else if self.mode.supports_schip() && y == 0xC {
+                    {
+                        self.display.scroll(ScrollDirection::Down, nibble as usize)
+                    }
+                } else {
+                    match byte {
+                        // 00E0 - Clear the screen
+                        0xE0 => self.display.clear(),
+                        // 00EE - Return from subroutine
+                        0xEE => {
+                            self.stack_pointer = self.stack_pointer.saturating_sub(1);
+                            self.program_counter = self.stack[self.stack_pointer as usize];
+                            return;
+                        }
+                        // 00FF - Enable high resolution mode (SUPER-CHIP)
+                        0xFF if self.mode.supports_schip() => {
+                            self.display = Display::big();
+                            self.highres = true;
+                        }
+                        // 00FE - Disable high resolution mode (SUPER-CHIP)
+                        0xFE if self.mode.supports_schip() => {
+                            self.display = Display::small();
+                            self.highres = false;
+                        }
+                        // 00FB - Scroll the display 4 pixels right (SUPER-CHIP)
+                        0xFB if self.mode.supports_schip() => {
+                            self.display.scroll(ScrollDirection::Right, 4)
+                        }
+                        // 00FC - Scroll the display 4 pixels left (SUPER-CHIP)
+                        0xFC if self.mode.supports_schip() => {
+                            self.display.scroll(ScrollDirection::Left, 4)
+                        }
+                        // 00FD - Exit the interpreter (SUPER-CHIP)
+                        0xFD if self.mode.supports_schip() => {
+                            self.stop();
+                            self.reset();
+                        }
+                        _ => self.halt(format!(
+                            "Machine code routines are not supported: {:04X}. Try a different CHIP-8 extension.",
+                            opcode
+                        )),
+                    }
+                }
+            }
             // 1nnn - Jump to nnn
             0x1 => {
                 self.program_counter = addr;
@@ -384,7 +451,7 @@ impl Chip8 {
                     self.V[x] <<= 1;
                     self.set_flag(shifted >> 7);
                 }
-                _ => (),
+                _ => self.halt(format!("Illegal instruction: {:04X}", opcode)),
             },
             // 9xy0 - Skip if Vx != Vy
             0x9 if nibble == 0 => {
@@ -407,6 +474,65 @@ impl Chip8 {
             }
             // Cxnn - Set Vx = a random value & nn
             0xC => self.V[x] = rand::thread_rng().gen::<u8>() & byte,
+            // Dxy0 - Draw 16x16 sprite at Vx, Vy from address I (SUPER-CHIP)
+            0xD if self.mode.supports_schip() && nibble == 0 => {
+                if self.quirks.wait_for_vblank && !self.vblank {
+                    return;
+                }
+
+                let width = if self.highres { 128 } else { 64 };
+                let height = if self.highres { 64 } else { 32 };
+
+                let dx = self.V[x] as u16;
+                let dy = self.V[y] as u16;
+
+                let mut overlap = false;
+                for row in 0..16 as u16 {
+                    let sprite_byte = self.memory.ram[self.I as usize + row as usize * 2];
+                    for cell in 0..8 {
+                        if self.quirks.edge_clipping
+                            && (dx % width + cell > width - 1 || dy % height + row > height - 1)
+                        {
+                            break;
+                        }
+
+                        let sprite_pixel = sprite_byte & (0b10000000 >> cell) != 0;
+
+                        let target_pixel =
+                            ((dx + cell) % width + (dy + row) % height * width) as usize;
+
+                        if sprite_pixel {
+                            if self.display.pixels[target_pixel] {
+                                overlap = true;
+                            }
+                            self.display.pixels[target_pixel] = !self.display.pixels[target_pixel];
+                        }
+                    }
+                    let sprite_byte = self.memory.ram[self.I as usize + row as usize * 2 + 1];
+                    for cell in 8..16 {
+                        if self.quirks.edge_clipping
+                            && (dx % width + cell > width - 1 || dy % height + row > height - 1)
+                        {
+                            break;
+                        }
+
+                        let sprite_pixel = sprite_byte & (0b10000000 >> (cell - 8)) != 0;
+
+                        let target_pixel =
+                            ((dx + cell) % width + (dy + row) % height * width) as usize;
+
+                        if sprite_pixel {
+                            if self.display.pixels[target_pixel] {
+                                overlap = true;
+                            }
+                            self.display.pixels[target_pixel] = !self.display.pixels[target_pixel];
+                        }
+                    }
+                }
+                self.set_flag(if overlap { 1 } else { 0 });
+
+                self.vblank = false;
+            }
             // Dxyn - Draw 8xn sprite at Vx, Vy from address I
             // Optionally wait for a vblank interrupt (quirk)
             0xD => {
@@ -426,21 +552,26 @@ impl Chip8 {
                     I have no idea why this way works but my way did not.
                 */
 
+                let width = if self.highres { 128 } else { 64 };
+                let height = if self.highres { 64 } else { 32 };
+
+                let dx = self.V[x] as u16;
+                let dy = self.V[y] as u16;
+
                 let mut overlap = false;
                 for row in 0..nibble as u16 {
                     let sprite_byte = self.memory.ram[self.I as usize + row as usize];
                     for cell in 0..8 {
-                        let dx = self.V[x] as u16;
-                        let dy = self.V[y] as u16;
-
-                        if self.quirks.edge_clipping && (dx % 64 + cell > 63 || dy % 32 + row > 31)
+                        if self.quirks.edge_clipping
+                            && (dx % width + cell > width - 1 || dy % height + row > height - 1)
                         {
                             break;
                         }
 
                         let sprite_pixel = sprite_byte & (0b10000000 >> cell) != 0;
 
-                        let target_pixel = ((dx + cell) % 64 + (dy + row) % 32 * 64) as usize;
+                        let target_pixel =
+                            ((dx + cell) % width + (dy + row) % height * width) as usize;
 
                         if sprite_pixel {
                             if self.display.pixels[target_pixel] {
@@ -467,10 +598,10 @@ impl Chip8 {
                         self.increment_program_counter();
                     }
                 }
-                _ => (),
+                _ => self.halt(format!("Illegal instruction: {:04X}", opcode)),
             },
             0xF => match byte {
-                // Ex07 - Set Vx to delay
+                // Fx07 - Set Vx to delay
                 0x07 => self.V[x] = self.delay,
                 // Fx0A - Wait for a key pressed and released and set it to Vx
                 0x0A => {
@@ -484,7 +615,11 @@ impl Chip8 {
                 // Fx1E - Set I += Vx
                 0x1E => self.I += self.V[x] as u16,
                 // Fx29 - Set I to the address of the font sprite for Vx's lowest nibble
-                0x29 => self.I = (self.V[x] as u16) % 16 * 5,
+                0x29 => self.I = (self.V[x] as u16 & 0x000F) * 5,
+                // Fx30 - Set I to the address of the large font sprite for Vx's lowest nibble (SUPER-CHIP)
+                0x30 if self.mode.supports_schip() => {
+                    self.I = (self.V[x] as u16 & 0x000F) * 10 + 16 * 5
+                }
                 // Fx33 - Write Vx as BCD to addresses I, I+1 and I+2
                 0x33 => {
                     self.write_byte(self.I, self.V[x] / 100);
@@ -492,34 +627,49 @@ impl Chip8 {
                     self.write_byte(self.I + 2, (self.V[x] % 100) % 10);
                 }
                 // Fx55 - Write V0 to Vx to addresses I to I+x, I is incremented by x
-                // Or I is incremented by x+1 (quirk)
+                // Or I is not incremented at all (quirk)
                 0x55 => {
                     for i in 0..=x {
                         self.write_byte(self.I + i as u16, self.V[i]);
                     }
-                    self.I += if self.quirks.save_load_increment {
-                        x as u16
-                    } else {
-                        x as u16 + 1
-                    };
+                    if !self.quirks.save_load_increment {
+                        self.I += x as u16 + 1
+                    }
                 }
                 // Fx65 - Read from addresses I to I+x to V0 to Vx, I is incremented by x
-                // Or I is incremented by x+1 (quirk)
+                // Or I is not incremented at all (quirk)
                 0x65 => {
                     for i in 0..=x {
                         self.V[i] = self.read_byte(self.I + i as u16);
                     }
-                    self.I += if self.quirks.save_load_increment {
-                        x as u16
-                    } else {
-                        x as u16 + 1
-                    };
+                    if !self.quirks.save_load_increment {
+                        self.I += x as u16 + 1
+                    }
                 }
-                _ => (),
+                // Fx75 - Save V0-Vx to persistent storage (SUPER-CHIP)
+                0x75 if self.mode.supports_schip() => {
+                    for i in 0..=x {
+                        self.persistent_flags[i] = self.V[i];
+                    }
+                    self.save_persistent_flags();
+                }
+                // Fx85 - Load V0-Vx from persistent storage (SUPER-CHIP)
+                0x85 if self.mode.supports_schip() => {
+                    for i in 0..=x {
+                        self.V[i] = self.persistent_flags[i];
+                    }
+                }
+                _ => self.halt(format!("Illegal instruction: {:04X}", opcode)),
             },
-            _ => (),
+            _ => self.halt(format!("Illegal instruction: {:04X}", opcode)),
         }
         self.increment_program_counter();
+    }
+
+    /// Stop execution in case of an exceptional event.
+    pub fn halt(&mut self, reason: String) {
+        self.stop();
+        self.halt_message = Some(reason);
     }
 }
 
@@ -527,32 +677,32 @@ impl Chip8 {
 impl Chip8 {
     /// Check if `running` is `true`. For the inspector.
     #[inline]
-    pub fn is_running(&self) -> bool {
+    pub const fn is_running(&self) -> bool {
         self.running
     }
     /// Get register V`i`. For the inspector.
     #[inline]
-    pub fn get_register(&self, i: usize) -> u8 {
+    pub const fn get_register(&self, i: usize) -> u8 {
         self.V[i]
     }
     /// Get register I. For the inspector.
     #[inline]
-    pub fn get_i(&self) -> u16 {
+    pub const fn get_i(&self) -> u16 {
         self.I
     }
     /// Get the program counter. For the inspector.
     #[inline]
-    pub fn get_program_counter(&self) -> u16 {
+    pub const fn get_program_counter(&self) -> u16 {
         self.program_counter
     }
     /// Get the stack pointer. For the inspector.
     #[inline]
-    pub fn get_stack_pointer(&self) -> u8 {
+    pub const fn get_stack_pointer(&self) -> u8 {
         self.stack_pointer
     }
     /// Get the length of the stack. 12 for CHIP-8, 16 for SUPER-CHIP and XO-CHIP. For the inspector.
     #[inline]
-    pub fn get_stack_size(&self) -> usize {
+    pub const fn get_stack_size(&self) -> usize {
         self.stack_size
     }
     /// Get the `i`th value in the stack. For the inspector.
@@ -562,33 +712,44 @@ impl Chip8 {
     }
     /// Get the delay timer. For the inspector.
     #[inline]
-    pub fn get_delay(&self) -> u8 {
+    pub const fn get_delay(&self) -> u8 {
         self.delay
     }
     /// Get the sound timer. For the inspector.
     #[inline]
-    pub fn get_sound(&self) -> u8 {
+    pub const fn get_sound(&self) -> u8 {
         self.sound
     }
     /// Get the length of RAM. For the inspector.
     #[inline]
-    pub fn ram_len(&self) -> usize {
+    pub const fn ram_len(&self) -> usize {
         self.memory.ram.len()
     }
     /// Get the index of the register where the next key press will be saved as a result of the Fx0A instruction.
     /// For the inspector.
     #[inline]
-    pub fn get_key_destination_register(&self) -> usize {
+    pub const fn get_key_destination_register(&self) -> usize {
         self.key_destination
     }
     /// Get the state of key `i` on the keypad. For the inspector.
     #[inline]
-    pub fn get_key_state(&self, key: usize) -> bool {
+    pub const fn get_key_state(&self, key: usize) -> bool {
         self.keypad[key]
     }
     /// Check if the interpreter is waiting for a key press with the Fx0A instruction. For the inspector.
     #[inline]
-    pub fn is_waiting_for_key(&self) -> bool {
+    pub const fn is_waiting_for_key(&self) -> bool {
         self.awaiting_key
+    }
+    /// Get SUPER-CHIP persistent flags. For the inspector.
+    #[inline]
+    pub const fn get_persistent_flags(&self) -> [u8; 8] {
+        self.persistent_flags
+    }
+    /// Set all persistent flags to zero.
+    #[inline]
+    pub fn clear_persistent_flags(&mut self) {
+        self.persistent_flags = [0; 8];
+        self.save_persistent_flags();
     }
 }

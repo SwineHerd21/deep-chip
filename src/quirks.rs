@@ -7,7 +7,7 @@ pub struct Quirks {
     /// If `true`, the `8xy6` and `8xyE` opcodes will set Vx to Vx >> 1.  
     /// If `false`, the `8xy6` and `8xyE` opcodes will set Vx to Vy >> 1.
     pub direct_shifting: bool,
-    /// If `true`, the `Fx55` and `Fx65` opcodes will set I to I + x.  
+    /// If `true`, the `Fx55` and `Fx65` opcodes will not modify I.  
     /// If `false`, the `Fx55` and `Fx65` opcodes will set I to I + x + 1.
     pub save_load_increment: bool,
     /// If `true`, the `Bnnn` opcode will jump to nnn + V0.  
@@ -22,7 +22,7 @@ pub struct Quirks {
 }
 
 impl Quirks {
-    /// The quirks of the original CHIP-8 implementation.  
+    /// The quirks of the original CHIP-8 implementation on the COSMAC-VIP.  
     ///
     /// - bitwise_reset_vf: true
     /// - direct_shifting: false
@@ -30,7 +30,7 @@ impl Quirks {
     /// - jump_to_x: false
     /// - wait_for_vblank: true
     /// - edge_clipping: true
-    pub fn original_chip8() -> Quirks {
+    pub const fn vip_chip() -> Quirks {
         Quirks {
             bitwise_reset_vf: true,
             direct_shifting: false,
@@ -41,22 +41,64 @@ impl Quirks {
         }
     }
 
+    /// The default quirk configuration of the Octo CHIP-8 emulator.  
+    ///
+    /// - bitwise_reset_vf: false
+    /// - direct_shifting: false
+    /// - save_load_increment: false
+    /// - jump_to_x: false
+    /// - wait_for_vblank: false
+    /// - edge_clipping: false
+    pub const fn octo_chip() -> Quirks {
+        Quirks {
+            bitwise_reset_vf: false,
+            direct_shifting: false,
+            save_load_increment: false,
+            jump_to_x: false,
+            wait_for_vblank: false,
+            edge_clipping: false,
+        }
+    }
+
     /// The quirks of the SUPER-CHIP 1.1.  
     ///
-    /// - bitwise_reset_vf: true
+    /// - bitwise_reset_vf: false
     /// - direct_shifting: true
     /// - save_load_increment: true
-    /// - jump_to_x: false
-    /// - wait_for_vblank: true
+    /// - jump_to_x: true
+    /// - wait_for_vblank: false
     /// - edge_clipping: true
-    pub fn super_chip1_1() -> Quirks {
+    pub const fn super_chip1_1() -> Quirks {
         Quirks {
-            bitwise_reset_vf: true,
+            bitwise_reset_vf: false,
             direct_shifting: true,
             save_load_increment: true,
-            jump_to_x: false,
-            wait_for_vblank: true,
+            jump_to_x: true,
+            wait_for_vblank: false,
             edge_clipping: true,
+        }
+    }
+}
+
+/// Determines what CHIP-8 extension to run as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Mode {
+    /// Run as a CHIP-8 interpreter
+    CHIP8,
+    /// Run as a SUPER-CHIP 1.1 interpreter
+    SCHIP11,
+    /// Run as an XO-CHIP interpreter (not implemented)
+    XOCHIP,
+}
+
+impl Mode {
+    /// Check whether the extension supports all features introduced by SUPEP-CHIP
+    #[inline]
+    pub const fn supports_schip(&self) -> bool {
+        match self {
+            Mode::CHIP8 => false,
+            Mode::SCHIP11 => true,
+            Mode::XOCHIP => true,
         }
     }
 }
