@@ -35,7 +35,7 @@ Press "Load ROM" and enter a path to a binary CHIP-8 ROM file to load it into th
 The "Cycles" counter shows shows the progress of the current frame. You can set yourself how many cycles to execute per frame.  
 Press "Reset" to reset the interpreter to its inital state and reload the ROM (it will be loaded from the app's memory, not the original file).
 
-To change what CHIP-8 extension the interpreter runs as, click the "CHIP-8" text in the bottom panel.
+To change what CHIP-8 variant the interpreter runs as, click the "CHIP-8" text in the bottom panel.
 
 The "Quirks" tab allows configuration of interpreter quirks as specified in [Timendus' quirks test ROM](https://github.com/Timendus/chip8-test-suite?tab=readme-ov-file#quirks-test). The quirks have tooltips to explain what they do.
 
@@ -63,7 +63,7 @@ E-Chip has several panels that show the current state of the interpreter.
 ## Interpreter state
 
 The bottom panel shows the values of the registers, stack, timers and the current instruction. The stack view will highlight the current top value. It also show when the interpreter is waiting for a key press.  
-The top section lets you select which CHIP-8 extension to run as and shows information specific to it.  
+The top section lets you select which CHIP-8 variant to run as and shows information specific to it.  
 The keypad shows what keys are currently pressed on the CHIP-8 keypad layout.
 
 ![interpreter state](interpreter_state.png)

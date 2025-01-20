@@ -285,7 +285,7 @@ impl eframe::App for Emulator {
                 &mut self.load_error,
             )
         }
-        draw_mode_specifics(&mut interpreter, &self.rom, ctx);
+        draw_variant_specifics(&mut interpreter, &self.rom, ctx);
         draw_controls(
             &mut interpreter,
             &mut self.rom,

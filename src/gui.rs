@@ -310,7 +310,7 @@ pub fn draw_controls(
 }
 
 #[inline]
-pub fn draw_mode_specifics(interpreter: &mut Chip8, rom: &Vec<u8>, ctx: &egui::Context) {
+pub fn draw_variant_specifics(interpreter: &mut Chip8, rom: &Vec<u8>, ctx: &egui::Context) {
     egui::TopBottomPanel::bottom("specifics")
         .show_separator_line(true)
         .resizable(false)
@@ -319,20 +319,20 @@ pub fn draw_mode_specifics(interpreter: &mut Chip8, rom: &Vec<u8>, ctx: &egui::C
             ui.visuals_mut().override_text_color = Some(TEXT_COLOR);
 
             ui.horizontal(|ui| {
-                let current_mode = match interpreter.mode {
-                    e_chip::Mode::CHIP8 => "CHIP-8",
-                    e_chip::Mode::SCHIP11 => "SUPER-CHIP 1.1",
-                    e_chip::Mode::XOCHIP => "XO-CHIP",
+                let current_variant = match interpreter.variant {
+                    e_chip::Variant::CHIP8 => "CHIP-8",
+                    e_chip::Variant::SCHIP11 => "SUPER-CHIP 1.1",
+                    e_chip::Variant::XOCHIP => "XO-CHIP",
                 };
 
                 ui.add_space(1.0);
 
                 if interpreter.is_running() {
-                    ui.label(current_mode);
+                    ui.label(current_variant);
                 } else {
                     ui.visuals_mut().button_frame = false;
                     if ui
-                        .menu_button(current_mode, |ui| {
+                        .menu_button(current_variant, |ui| {
                             if ui.button("CHIP-8").clicked() {
                                 *interpreter = Chip8::chip8();
                                 interpreter.load_program(rom);
@@ -350,7 +350,7 @@ pub fn draw_mode_specifics(interpreter: &mut Chip8, rom: &Vec<u8>, ctx: &egui::C
                     }
                 }
 
-                if interpreter.mode != e_chip::Mode::CHIP8 {
+                if interpreter.variant != e_chip::Variant::CHIP8 {
                     ui.separator();
 
                     ui.colored_label(
@@ -399,7 +399,7 @@ pub fn draw_registers_and_keypad(interpreter: &Chip8, ctx: &egui::Context) {
                                 let instruction_breakdown = explain_instruction(
                                     interpreter.get_current_opcode(),
                                     &interpreter.quirks,
-                                    &interpreter.mode,
+                                    &interpreter.variant,
                                 );
 
                                 ui.horizontal(|ui| {
@@ -639,14 +639,14 @@ pub fn draw_ram(interpreter: &Chip8, ctx: &egui::Context) {
         });
 }
 
-/// Break down an opcode into a generic pattern and explanation, taking quirks and mode into account.  
+/// Break down an opcode into a generic pattern and explanation, taking quirks and variant into account.  
 ///
 /// For example, when given the opcode `3124`, the function will return `("3xnn", "Skip if Vx != nn")`
 #[inline]
 pub fn explain_instruction(
     opcode: u16,
     quirks: &Quirks,
-    mode: &e_chip::Mode,
+    variant: &e_chip::Variant,
 ) -> (&'static str, &'static str) {
     let unknown = ("????", "Illegal instruction");
     match opcode >> 12 {
@@ -658,11 +658,11 @@ pub fn explain_instruction(
                     0x0000 => ("0000", "Empty (Stops emulator)"),
                     0x00E0 => ("00E0", "Clear screen"),
                     0x00EE => ("00EE", "Return from subroutine"),
-                    0x00FB if mode.supports_schip() => ("00FB", "Scroll right by 4 pixels"),
-                    0x00FC if mode.supports_schip() => ("00FB", "Scroll left by 4 pixels"),
-                    0x00FD if mode.supports_schip() => ("00FD", "Exit the interpreter"),
-                    0x00FE if mode.supports_schip() => ("00FE", "Disable highres mode"),
-                    0x00FF if mode.supports_schip() => ("00FF", "Enable highres mode"),
+                    0x00FB if variant.supports_schip() => ("00FB", "Scroll right by 4 pixels"),
+                    0x00FC if variant.supports_schip() => ("00FB", "Scroll left by 4 pixels"),
+                    0x00FD if variant.supports_schip() => ("00FD", "Exit the interpreter"),
+                    0x00FE if variant.supports_schip() => ("00FE", "Disable highres mode"),
+                    0x00FF if variant.supports_schip() => ("00FF", "Enable highres mode"),
                     _ => ("0nnn", "Machine code routine"),
                 }
             }
@@ -696,7 +696,7 @@ pub fn explain_instruction(
         0xB if quirks.jump_to_x => ("Bxnn", "Jump to nnn + Vx"),
         0xB => ("Bnnn", "Jump to nnn + V0"),
         0xC => ("Cnnn", "Vx = random AND nn"),
-        0xD if mode.supports_schip() && opcode & 0x000F == 0 => {
+        0xD if variant.supports_schip() && opcode & 0x000F == 0 => {
             ("Dxy0", "Draw 16x16 sprite at (Vx, Vy)")
         }
         0xD => ("Dxyn", "Draw 8xn sprite at (Vx, Vy)"),
@@ -712,14 +712,14 @@ pub fn explain_instruction(
             0x18 => ("Fx18", "sound = Vx"),
             0x1E => ("Fx1E", "I = I + Vx"),
             0x29 => ("Fx29", "I = font for Vx"),
-            0x30 if mode.supports_schip() => ("Fx30", "I = big font for Vx"),
+            0x30 if variant.supports_schip() => ("Fx30", "I = big font for Vx"),
             0x33 => ("Fx33", "Write Vx as BCD"),
             0x55 if quirks.save_load_increment => ("Fx55", "Write V0 to Vx"),
             0x55 => ("Fx65", "Write V0 to Vx (I = I + x)"),
             0x65 if quirks.save_load_increment => ("Fx65", "Read V0 to Vx"),
             0x65 => ("Fx65", "Read V0 to Vx (I = I + x)"),
-            0x75 if mode.supports_schip() => ("Fx75", "Save V0 to Vx to persistent flags"),
-            0x85 if mode.supports_schip() => ("Fx85", "Load V0 to Vx from persistent flags"),
+            0x75 if variant.supports_schip() => ("Fx75", "Save V0 to Vx to persistent flags"),
+            0x85 if variant.supports_schip() => ("Fx85", "Load V0 to Vx from persistent flags"),
             _ => unknown,
         },
         _ => unknown,

@@ -5,8 +5,8 @@ use egui::Color32;
 use memory::Memory;
 use rand::Rng;
 
-pub use quirks::Mode;
 pub use quirks::Quirks;
+pub use quirks::Variant;
 
 mod display;
 mod memory;
@@ -33,8 +33,8 @@ pub struct Chip8 {
     memory: Memory,
     /// A monochrome 64x32-pixel display.
     display: Display,
-    /// Applicable for SUPER-CHIP mode: if false, the display will be treated as if the resolution was 64x32.
-    /// Otherwise, the resolution will be 128x64.
+    /// If false, the display will have a resolution of 64x32.
+    /// Otherwise, if the selected variant supports it, the resolution will be 128x64.
     pub highres: bool,
     /// 16 keys corresponding to hex digits.
     keypad: [bool; 16],
@@ -42,8 +42,8 @@ pub struct Chip8 {
     stack: Vec<u16>,
 
     // Configuration and control
-    /// What kind of CHIP-8 extension to run as.
-    pub mode: Mode,
+    /// What kind of CHIP-8 variant to run as.
+    pub variant: Variant,
     /// The desired implementation quirks.
     pub quirks: Quirks,
     /// Sound will play if true.
@@ -88,7 +88,7 @@ impl Chip8 {
             keypad: [false; 16],
             stack: vec![0; stack_size],
             // Configuration
-            mode: Mode::CHIP8,
+            variant: Variant::CHIP8,
             quirks: Quirks::vip_chip(),
             frame_cycle: 0,
             execution_speed: 15,
@@ -122,7 +122,7 @@ impl Chip8 {
             keypad: [false; 16],
             stack: vec![0; stack_size],
             // Configuration
-            mode: Mode::SCHIP11,
+            variant: Variant::SCHIP11,
             quirks: Quirks::super_chip1_1(),
             frame_cycle: 0,
             execution_speed: 30,
@@ -294,7 +294,7 @@ impl Chip8 {
                     self.stop();
                 }
                 // 00Cn - Scroll down by n pixels (SUPER-CHIP)
-                else if self.mode.supports_schip() && y == 0xC {
+                else if self.variant.supports_schip() && y == 0xC {
                     {
                         self.display.scroll(ScrollDirection::Down, nibble as usize)
                     }
@@ -309,30 +309,30 @@ impl Chip8 {
                             return;
                         }
                         // 00FF - Enable high resolution mode (SUPER-CHIP)
-                        0xFF if self.mode.supports_schip() => {
+                        0xFF if self.variant.supports_schip() => {
                             self.display = Display::big();
                             self.highres = true;
                         }
                         // 00FE - Disable high resolution mode (SUPER-CHIP)
-                        0xFE if self.mode.supports_schip() => {
+                        0xFE if self.variant.supports_schip() => {
                             self.display = Display::small();
                             self.highres = false;
                         }
                         // 00FB - Scroll the display 4 pixels right (SUPER-CHIP)
-                        0xFB if self.mode.supports_schip() => {
+                        0xFB if self.variant.supports_schip() => {
                             self.display.scroll(ScrollDirection::Right, 4)
                         }
                         // 00FC - Scroll the display 4 pixels left (SUPER-CHIP)
-                        0xFC if self.mode.supports_schip() => {
+                        0xFC if self.variant.supports_schip() => {
                             self.display.scroll(ScrollDirection::Left, 4)
                         }
                         // 00FD - Exit the interpreter (SUPER-CHIP)
-                        0xFD if self.mode.supports_schip() => {
+                        0xFD if self.variant.supports_schip() => {
                             self.stop();
                             self.reset();
                         }
                         _ => self.halt(format!(
-                            "Machine code routines are not supported: {:04X}. Try a different CHIP-8 extension.",
+                            "Machine code routines are not supported: {:04X}. Try a different CHIP-8 variant.",
                             opcode
                         )),
                     }
@@ -475,7 +475,7 @@ impl Chip8 {
             // Cxnn - Set Vx = a random value & nn
             0xC => self.V[x] = rand::thread_rng().gen::<u8>() & byte,
             // Dxy0 - Draw 16x16 sprite at Vx, Vy from address I (SUPER-CHIP)
-            0xD if self.mode.supports_schip() && nibble == 0 => {
+            0xD if self.variant.supports_schip() && nibble == 0 => {
                 if self.quirks.wait_for_vblank && !self.vblank {
                     return;
                 }
@@ -617,7 +617,7 @@ impl Chip8 {
                 // Fx29 - Set I to the address of the font sprite for Vx's lowest nibble
                 0x29 => self.I = (self.V[x] as u16 & 0x000F) * 5,
                 // Fx30 - Set I to the address of the large font sprite for Vx's lowest nibble (SUPER-CHIP)
-                0x30 if self.mode.supports_schip() => {
+                0x30 if self.variant.supports_schip() => {
                     self.I = (self.V[x] as u16 & 0x000F) * 10 + 16 * 5
                 }
                 // Fx33 - Write Vx as BCD to addresses I, I+1 and I+2
@@ -647,14 +647,14 @@ impl Chip8 {
                     }
                 }
                 // Fx75 - Save V0-Vx to persistent storage (SUPER-CHIP)
-                0x75 if self.mode.supports_schip() => {
+                0x75 if self.variant.supports_schip() => {
                     for i in 0..=x {
                         self.persistent_flags[i] = self.V[i];
                     }
                     self.save_persistent_flags();
                 }
                 // Fx85 - Load V0-Vx from persistent storage (SUPER-CHIP)
-                0x85 if self.mode.supports_schip() => {
+                0x85 if self.variant.supports_schip() => {
                     for i in 0..=x {
                         self.V[i] = self.persistent_flags[i];
                     }

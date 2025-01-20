@@ -80,9 +80,9 @@ impl Quirks {
     }
 }
 
-/// Determines what CHIP-8 extension to run as.
+/// Determines what CHIP-8 variant to run as.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Mode {
+pub enum Variant {
     /// Run as a CHIP-8 interpreter
     CHIP8,
     /// Run as a SUPER-CHIP 1.1 interpreter
@@ -91,14 +91,14 @@ pub enum Mode {
     XOCHIP,
 }
 
-impl Mode {
-    /// Check whether the extension supports all features introduced by SUPEP-CHIP
+impl Variant {
+    /// Check whether the variant supports all features introduced by SUPEP-CHIP
     #[inline]
     pub const fn supports_schip(&self) -> bool {
         match self {
-            Mode::CHIP8 => false,
-            Mode::SCHIP11 => true,
-            Mode::XOCHIP => true,
+            Variant::CHIP8 => false,
+            Variant::SCHIP11 => true,
+            Variant::XOCHIP => true,
         }
     }
 }
