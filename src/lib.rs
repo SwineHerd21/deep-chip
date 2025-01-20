@@ -147,7 +147,7 @@ impl Chip8 {
         self.delay = 0;
         self.sound = 0;
         self.memory.reset();
-        self.display.clear();
+        self.display = Display::small();
         self.highres = false;
         self.keypad = [false; 16];
         self.stack = vec![0; self.stack_size];
