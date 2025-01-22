@@ -117,7 +117,7 @@ impl Chip8 {
             sound: 0,
             // Devices
             memory: Memory::new(),
-            display: Display::small(),
+            display: Display::big(),
             highres: false,
             keypad: [false; 16],
             stack: vec![0; stack_size],
@@ -147,7 +147,7 @@ impl Chip8 {
         self.delay = 0;
         self.sound = 0;
         self.memory.reset();
-        self.display = Display::small();
+        self.display.clear();
         self.highres = false;
         self.keypad = [false; 16];
         self.stack = vec![0; self.stack_size];
@@ -232,7 +232,8 @@ impl Chip8 {
     /// Read the display in the form of a texture.
     #[inline]
     pub fn get_display(&self, background_color: Color32, fill_color: Color32) -> egui::ColorImage {
-        self.display.render(background_color, fill_color)
+        self.display
+            .render(self.highres, background_color, fill_color)
     }
     /// Set vblank ready.
     #[inline]
@@ -296,7 +297,12 @@ impl Chip8 {
                 // 00Cn - Scroll down by n pixels (SUPER-CHIP)
                 else if self.variant.supports_schip() && y == 0xC {
                     {
-                        self.display.scroll(ScrollDirection::Down, nibble as usize)
+                        self.display.scroll(
+                            ScrollDirection::Down,
+                            nibble as usize,
+                            self.highres,
+                            self.quirks.lowres_scroll,
+                        )
                     }
                 } else {
                     match byte {
@@ -309,22 +315,14 @@ impl Chip8 {
                             return;
                         }
                         // 00FF - Enable high resolution mode (SUPER-CHIP)
-                        0xFF if self.variant.supports_schip() => {
-                            self.display = Display::big();
-                            self.highres = true;
-                        }
+                        0xFF if self.variant.supports_schip() => self.highres = true,
                         // 00FE - Disable high resolution mode (SUPER-CHIP)
-                        0xFE if self.variant.supports_schip() => {
-                            self.display = Display::small();
-                            self.highres = false;
-                        }
+                        0xFE if self.variant.supports_schip() => self.highres = false,
                         // 00FB - Scroll the display 4 pixels right (SUPER-CHIP)
-                        0xFB if self.variant.supports_schip() => {
-                            self.display.scroll(ScrollDirection::Right, 4)
-                        }
+                        0xFB if self.variant.supports_schip() => self.display.scroll(ScrollDirection::Right, 4,self.highres,self.quirks.lowres_scroll),
                         // 00FC - Scroll the display 4 pixels left (SUPER-CHIP)
                         0xFC if self.variant.supports_schip() => {
-                            self.display.scroll(ScrollDirection::Left, 4)
+                            self.display.scroll(ScrollDirection::Left, 4,self.highres,self.quirks.lowres_scroll)
                         }
                         // 00FD - Exit the interpreter (SUPER-CHIP)
                         0xFD if self.variant.supports_schip() => {

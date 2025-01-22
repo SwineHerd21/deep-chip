@@ -92,3 +92,4 @@ https://github.com/shonumi/Emu-Docs/tree/master - good emulator references
 https://github.com/JohnEarnest/chip8Archive - CHIP-8 ROMs  
 https://tobiasvl.github.io/blog/write-a-CHIP-8-emulator - technical reference  
 [Cowgod's CHIP-8 Technical Reference](http://devernay.free.fr/hacks/chip8/C8TECH10.HTM) - technical reference  
+https://github.com/Chromatophore/HP48-Superchip - SUPER-CHIP info and legacy scrolling

@@ -64,6 +64,10 @@ pub fn draw_menu(
                         &mut interpreter.quirks.wait_for_vblank,
                         "Wait for vblank interrupt",
                     ).on_hover_text("If true, the Dxyn opcode will wait for a vblank interrupt (happens 60 times a second) before drawing.\nIf false, the Dxyn opcode will draw immediately.");
+                    ui.checkbox(
+                        &mut interpreter.quirks.lowres_scroll,
+                        "Legacy scrolling",
+                    ).on_hover_text("Only applies to SUPER-CHIP: If `true`, the scroll opcodes (`00Cn`, `00FB`, `00FC`) in lowres mode will scroll by half pixels.\nIf `false`, the scroll opcodes in lowres mode will scroll the expected amount of full pixels.");
                 });
 
                 ui.menu_button("Settings", |ui| {
@@ -566,13 +570,19 @@ fn draw_key(ui: &mut egui::Ui, text: &str, key: bool) {
 }
 
 #[inline]
-pub fn draw_ram(interpreter: &Chip8, ctx: &egui::Context) {
+pub fn draw_ram(track_pc: &mut bool, interpreter: &Chip8, ctx: &egui::Context) {
     egui::SidePanel::right("ram")
         .show_separator_line(true)
         .default_width(242.5)
         .resizable(false)
         .show(ctx, |ui| {
-            ui.heading("RAM");
+            ui.horizontal(|ui| {
+                ui.heading("RAM");
+
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.checkbox(track_pc, "Track PC");
+                });
+            });
             ui.separator();
             ui.spacing_mut().scroll = ScrollStyle::solid();
             ScrollArea::vertical()
@@ -608,6 +618,9 @@ pub fn draw_ram(interpreter: &Chip8, ctx: &egui::Context) {
                                     bytes.clear();
                                 // Highlight the current instruction
                                 } else if i == interpreter.get_program_counter() + 1 {
+                                    if *track_pc {
+                                        ui.scroll_to_cursor(Some(Align::TOP));
+                                    }
                                     ui.label(
                                         RichText::new(format!(
                                             "{:02X} {:02X}",

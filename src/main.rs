@@ -77,6 +77,9 @@ struct Emulator {
     show_rom_window: bool,
     /// Whether to show the display settings window.
     show_display_settings: bool,
+
+    /// Whether the RAM panel should scroll to the address in the program counter.
+    track_pc: bool,
 }
 
 /// The duration of a single frame - the interpreter runs at 60 fps.
@@ -136,6 +139,7 @@ impl Emulator {
             show_load_modal: false,
             show_rom_window: false,
             show_display_settings: false,
+            track_pc: true,
             background_color: Color32::BLACK,
             fill_color: Color32::WHITE,
         }
@@ -269,7 +273,7 @@ impl eframe::App for Emulator {
             &mut self.fill_color,
             &mut self.show_display_settings,
         );
-        draw_ram(&interpreter, ctx);
+        draw_ram(&mut self.track_pc, &interpreter, ctx);
         draw_registers_and_keypad(&interpreter, ctx);
 
         if self.show_rom_window {

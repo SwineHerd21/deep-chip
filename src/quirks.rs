@@ -19,6 +19,11 @@ pub struct Quirks {
     /// If `true`, the `Dxyn` opcode will clip sprites that go off the edge of the screen.  
     /// If `false`, the `Dxyn` opcode will wrap sprites that go off the edge of the screen around.
     pub edge_clipping: bool,
+    /// If `true` and emulating SUPER-CHIP, the scroll opcodes (`00Cn`, `00FB`, `00FC`) in lowres
+    /// mode will scroll half the amount pixels.
+    /// If `false` and emulating SUPER-CHIP, the scroll opcodes (`00Cn`, `00FB`, `00FC`) in lowres
+    /// mode will scroll the expected amount of pixels.
+    pub lowres_scroll: bool,
 }
 
 impl Quirks {
@@ -38,6 +43,7 @@ impl Quirks {
             jump_to_x: false,
             wait_for_vblank: true,
             edge_clipping: true,
+            lowres_scroll: false,
         }
     }
 
@@ -57,6 +63,7 @@ impl Quirks {
             jump_to_x: false,
             wait_for_vblank: false,
             edge_clipping: false,
+            lowres_scroll: false,
         }
     }
 
@@ -76,6 +83,7 @@ impl Quirks {
             jump_to_x: true,
             wait_for_vblank: false,
             edge_clipping: true,
+            lowres_scroll: false,
         }
     }
 }
